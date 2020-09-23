@@ -5,10 +5,12 @@ import sys
 server = reverb.Server(tables=[
     reverb.Table(
         name='my_table',
-        sampler=reverb.selectors.Uniform(),
+        sampler=reverb.selectors.Fifo(),
         remover=reverb.selectors.Fifo(),
         max_size=100,
-        rate_limiter=reverb.rate_limiters.MinSize(1)),
+        rate_limiter=reverb.rate_limiters.MinSize(1),
+        max_times_sampled=1,
+        )
     ],
     port=8000
 )
