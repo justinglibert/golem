@@ -14,17 +14,12 @@ def parse_args():
                                         "multiple distributed processes")
 
     # Optional arguments for the launch helper
-    parser.add_argument("--nnodes", type=int, default=1,
-                        help="The number of nodes to use for distributed "
-                             "training")
-    parser.add_argument("--node_rank", type=int, default=0,
-                        help="The rank of the node for multi-node distributed "
-                             "training")
-    parser.add_argument("--nproc_per_node", type=int, default=1,
-                        help="The number of processes to launch on each node, "
-                             "for GPU training, this is recommended to be set "
-                             "to the number of GPUs in your system so that "
-                             "each process can be bound to a single GPU.")
+    parser.add_argument("--current_rank", type=int, default=0,
+                        help="The current number of processes that already have been initialized")
+    parser.add_argument("--nproc", type=int, default=1,
+                        help="Number of processes to launch on this node")
+    parser.add_argument("--world_size", type=int, default=1,
+                        help="The final world size")
     parser.add_argument("--master_addr", default="127.0.0.1", type=str,
                         help="Master node (rank 0)'s address, should be either "
                              "the IP address or the hostname of node 0, for "
@@ -52,33 +47,27 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # world size in terms of number of processes
-    dist_world_size = args.nproc_per_node * args.nnodes
-
     # set PyTorch distributed related environmental variables
     current_env = os.environ.copy()
     current_env["MASTER_ADDR"] = args.master_addr
     current_env["MASTER_PORT"] = str(args.master_port)
-    current_env["WORLD_SIZE"] = str(dist_world_size)
+    current_env["WORLD_SIZE"] = str(args.world_size)
 
     processes = []
 
     print("GOLEM LAUNCHER")
-    if 'OMP_NUM_THREADS' not in os.environ and args.nproc_per_node > 1:
-        current_env["OMP_NUM_THREADS"] = str(1)
-        print("*****************************************\n"
-              "Setting OMP_NUM_THREADS environment variable for each process "
-              "to be {} in default, to avoid your system being overloaded, "
-              "please further tune the variable for optimal performance in "
-              "your application as needed. \n"
-              "*****************************************".format(current_env["OMP_NUM_THREADS"]))
+    print("World Size", args.world_size)
+    print("N proc", args.nproc)
+    print("Current rank", args.current_rank)
 
-    for local_rank in range(0, args.nproc_per_node):
+    for local_rank in range(0, args.nproc):
         # each process's rank
-        dist_rank = args.nproc_per_node * args.node_rank + local_rank
+        dist_rank = args.current_rank + local_rank
         current_env["RANK"] = str(dist_rank)
         current_env["LOCAL_RANK"] = str(local_rank)
         current_env["GOLEM_ENTRY_POINT"] = args.entry_point
+        current_env["GOLEM_NAME"] = '{}:{}'.format(
+            args.entry_point, dist_rank)
 
         # spawn the processes
         cmd = []

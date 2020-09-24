@@ -25,7 +25,7 @@ setuptools.setup(
         exclude=["jobs", "jobs.*"]
     ),
     entry_points={
-        'console_scripts': ['glm=golem.launcher_cli:main'],
+        'console_scripts': ['glm-launcher=golem.launcher_cli:main'],
     },
     classifiers=[
         # How mature is this project? Common values are

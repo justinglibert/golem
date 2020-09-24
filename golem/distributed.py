@@ -8,12 +8,12 @@ from typing import Union, List, Any, Callable
 from time import sleep
 import traceback
 from torch.distributed import rpc
-
+import os
 import enum
 import torch as t
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as dist_c10d
-
+from .utils import default_logger as logger
 WORLD = None  # type: Union[None, World]
 
 
@@ -291,8 +291,9 @@ class World:
                      rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
                          init_method=init_method,
                          num_send_recv_threads=rpc_threads,
-                         rpc_timeout=timedelta(seconds=rpc_timeout)
-                     ))
+                         rpc_timeout=rpc_timeout
+                     )
+                     )
 
         # get rank-name mapping
         self.rank_name_map = {}
@@ -399,6 +400,16 @@ class World:
 
     def __reduce__(self):  # pragma: no cover
         raise RuntimeError("World is not picklable, create it per process!")
+
+
+def create_world_with_env(**kwargs) -> World:
+    logger.info("Waiting for all the Golem Processes to join...")
+    return World(
+        name=os.environ["GOLEM_NAME"],
+        rank=int(os.environ["RANK"]),
+        world_size=int(os.environ["WORLD_SIZE"]),
+        init_method="env://",
+        **kwargs)
 
 
 class CollectiveGroup:
