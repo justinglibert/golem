@@ -5,20 +5,18 @@ import golem as glm
 
 
 def learner(init: Tuple, cfg: DictConfig):
-    print("I am a learner!")
-    print(init)
-    print(cfg)
+    logger = glm.utils.default_logger
+    logger.info("I am the learner")
 
 
 def actor(init: Tuple, cfg: DictConfig):
-    print("I am an actor!")
-    print(init)
-    print(cfg)
+    logger = glm.utils.default_logger
+    logger.info("I am the actor")
 
 
 def init(cfg: DictConfig):
-    print("I am the init")
-    print(cfg)
+    logger = glm.utils.default_logger
+    logger.info("I am the init")
     return (1, 2)
 
 

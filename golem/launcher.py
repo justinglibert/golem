@@ -1,19 +1,18 @@
 import hydra
 import os
-from hydra import utils
+from hydra import utils as hydra_utils
 from omegaconf import DictConfig
+from golem import utils
 
 
 def launch(init, entry_points):
     entry_point = os.environ["GOLEM_ENTRY_POINT"]
+    logger = utils.default_logger
 
     def launch_hydra(cfg: DictConfig):
-        print(cfg)
-        print("Current working directory  : {}".format(os.getcwd()))
-        print("Original working directory : {}".format(utils.get_original_cwd()))
-        print("to_absolute_path('foo')    : {}".format(
-            utils.to_absolute_path("foo")))
-        print("to_absolute_path('/foo')   : {}".format(utils.to_absolute_path("/foo")))
+        logger.info("Current working directory  : {}".format(os.getcwd()))
+        logger.info("Original working directory : {}".format(
+            hydra_utils.get_original_cwd()))
         init_tuple = init(cfg)
         entry_points[entry_point](init_tuple, cfg)
     return launch_hydra
