@@ -1,4 +1,4 @@
-
+from threading import RLock
 import time
 
 
@@ -7,12 +7,14 @@ class Counter:
         self._count = start
         self._start = start
         self._step = step
+        self._lock = RLock()
 
     def count(self):
         """
         Move counter forward by ``step``
         """
-        self._count += self._step
+        with self._lock:
+            self._count += self._step
 
     def get(self):
         """
@@ -24,7 +26,8 @@ class Counter:
         """
         Reset the counter.
         """
-        self._count = self._start
+        with self._lock:
+            self._count = self._start
 
     def __lt__(self, other):
         return self._count < other
@@ -52,12 +55,14 @@ class Switch:
             state: Internal state, ``True`` for on, ``False`` for off.
         """
         self._on = state
+        self._lock = RLock()
 
     def flip(self):
         """
         Inverse the internal state.
         """
-        self._on = not self._on
+        with self._lock:
+            self._on = not self._on
 
     def get(self) -> bool:
         """
@@ -70,13 +75,15 @@ class Switch:
         """
         Set to on.
         """
-        self._on = True
+        with self._lock:
+            self._on = True
 
     def off(self):
         """
         Set to off.
         """
-        self._on = False
+        with self._lock:
+            self._on = False
 
 
 class Trigger(Switch):

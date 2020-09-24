@@ -6,6 +6,7 @@ Attributes:
 """
 import colorlog
 from logging import INFO
+import time
 
 
 class FakeLogger(object):
@@ -46,3 +47,33 @@ default_logger.addHandler(_default_handler)
 default_logger.setLevel(INFO)
 default_logger.propagate = False
 fake_logger = FakeLogger()
+
+
+class SimpleProfiler(object):
+    def __init__(self):
+        self.start = time.time()
+        self.category_start = None
+        self.current_category = None
+        self.table = {}
+
+    def __call__(self, category):
+        if category not in self.table:
+            self.table[category] = 0
+        self.current_category = category
+        self.category_start = time.time()
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        total_time = time.time() - self.category_start
+        self.table[self.current_category] += total_time
+
+    def __repr__(self):
+        total_time = time.time() - self.start
+        lines = ""
+        for k in self.table.keys():
+            lines += "{}: {}s and {} percent of total time\n".format(
+                k, self.table[k] / 1000, self.table[k] / total_time * 100)
+        return lines

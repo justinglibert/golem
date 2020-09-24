@@ -1,6 +1,12 @@
-init:
-  size: 3
-learner:
-  test: "test"
-actor:
-  test: "test"
+training:
+  unroll_length: 80
+  batch_size: 2
+  total_steps: 1000000000
+  entropy_cost: 0.0006
+  baseline_cost: 0.5
+  discounting: 0.99
+  learning_rate: 0.00048
+  alpha: 0.99
+  momentum: 0.0
+  epsilon: 0.01
+  grad_norm_clipping: 40.0
