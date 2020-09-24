@@ -61,7 +61,7 @@ def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffe
     agent_state = model.initial_state(batch_size=1)
     agent_output, unused_state = model(env_output, agent_state)
     impala_group.barrier()
-    for i in range(1):
+    while impala_group.registered_sync("get_global_switch"):
         # Write old rollout end.
         for key in env_output:
             buffers[key][0, ...] = env_output[key]
@@ -85,6 +85,9 @@ def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffe
         replay_buffer.append(buffers)
         impala_group.registered_async("increment_sample_collected")
 
+        if world.rank == 0 and impala_group.registered_sync("get_samples_collected") > 20000:
+            impala_group.registered_sync("turn_global_switch_off")
+
     print("done")
     for k in buffers.keys():
         print(k, buffers[k].shape if type(buffers[k])
@@ -93,6 +96,8 @@ def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffe
     print(replay_buffer.all_size())
     print(len(replay_buffer.sample_batch(2)))
     print(world.name, impala_group.registered_sync("get_samples_collected"))
+    print("{} steps/s", impala_group.registered_sync("get_samples_collected") /
+          impala_group.registered_sync("get_global_timer"))
     # Have a barrier at the end to make sure everything is sync before exiting
     impala_group.barrier()
 
@@ -106,13 +111,19 @@ def init(cfg: DictConfig):
         buffer_name="buffer", group=impala_group,
         buffer_size=200
     )
-    # Counters
+    # Counters and Switch
     if world.rank == 0:
         logger.info("I am the rank 0. Creating counters")
         sample_counter = glm.widgets.Counter(step=80)
         impala_group.register(
             "increment_sample_collected", sample_counter.count)
         impala_group.register("get_samples_collected", sample_counter.get)
+        global_switch = glm.widgets.Switch(state=True)
+        impala_group.register(
+            "turn_global_switch_off", global_switch.off)
+        impala_group.register("get_global_switch", global_switch.get)
+        global_timer = glm.widgets.Timer()
+        impala_group.register("get_global_timer", global_timer.end)
     return (world, impala_group, replay_buffer)
 
 
