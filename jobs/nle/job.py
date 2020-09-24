@@ -22,4 +22,4 @@ def init(cfg: DictConfig):
     return (1, 2)
 
 
-hydra.main()(glm.launcher.launch(init, {"actor": actor, "leaner": learner}))()
+hydra.main()(glm.launcher.launch(init, {"actor": actor, "learner": learner}))()

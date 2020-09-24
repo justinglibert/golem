@@ -43,6 +43,9 @@ def parse_args():
     parser.add_argument("job_config", type=str,
                         help="Config name"
                         )
+    parser.add_argument("entry_point", type=str,
+                        help="Entry point"
+                        )
     return parser.parse_args()
 
 
@@ -75,6 +78,7 @@ def main():
         dist_rank = args.nproc_per_node * args.node_rank + local_rank
         current_env["RANK"] = str(dist_rank)
         current_env["LOCAL_RANK"] = str(local_rank)
+        current_env["GOLEM_ENTRY_POINT"] = args.entry_point
 
         # spawn the processes
         cmd = []
