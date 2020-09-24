@@ -1,6 +1,0 @@
-init:
-  size: 3
-learner:
-  test: test
-actor:
-  test: test
