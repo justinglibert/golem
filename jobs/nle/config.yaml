@@ -10,3 +10,4 @@ training:
   momentum: 0.0
   epsilon: 0.01
   grad_norm_clipping: 40.0
+  total_parameter_updates: 10

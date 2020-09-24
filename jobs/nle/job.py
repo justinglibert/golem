@@ -103,8 +103,9 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     impala_group.barrier()
     prof = glm.utils.SimpleProfiler()
-    while replay_buffer.all_size() < 10:
-        sleep(0.1)
+    with prof(category="sleeping"):
+        while replay_buffer.all_size() < 10:
+            sleep(0.1)
     for iteration in it.count():
         with prof(category="rpc"):
             bsize, buffers = replay_buffer.sample_batch(B)
@@ -165,6 +166,7 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
 
             episode_returns = batch["episode_return"][batch["done"]]
             stats = {
+                "real_batch_size": bsize,
                 "episode_returns": tuple(episode_returns.cpu().numpy()),
                 "mean_episode_return": torch.mean(episode_returns).item(),
                 "total_loss": total_loss.item(),
@@ -185,8 +187,11 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
             server.push(model)
             impala_group.registered_sync("increment_parameter_updates")
             impala_group.registered_sync("increment_step_processed")
-            if world.rank == 0 and impala_group.registered_sync("get_parameter_updates") > 10:
+            if world.rank == 0 and impala_group.registered_sync("get_parameter_updates") > cfg.training.total_parameter_updates:
                 impala_group.registered_sync("turn_global_switch_off")
+                break
+            elif impala_group.registered_sync("get_global_switch") is False:
+                break
 
     logger.info(prof)
     logger.info("{} steps sampled/s".format(impala_group.registered_sync("get_samples_collected") /
