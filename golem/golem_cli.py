@@ -73,7 +73,6 @@ def fit_job_on_nodes(current_rank, current_worldsize, placement, task, config, f
 
 
 def run_glm_launcher(c, experiment_id, job, config, tasks, world_size, master_ip, master_port, python_binary, daemon=True):
-    print(tasks)
     processes = tasks['processes']
     start_rank = tasks['start_rank']
     task = tasks['task']
@@ -82,7 +81,7 @@ def run_glm_launcher(c, experiment_id, job, config, tasks, world_size, master_ip
         '{} -c "import golem as glm;import os; print(os.path.abspath(os.path.join(glm.__path__[0], \'..\')))"'.format(python_binary), hide=True).stdout.strip()
     command = f'cd {golem_path} && {python_binary} -m golem.launcher_cli' + (DAEMON_FLAG if daemon else '') + f' --experiment_id {experiment_id} --master_addr {master_ip}' \
         + f' --master_port {master_port} --nproc {processes} --current_rank {start_rank} --world_size {world_size} {job} {config} {task}'
-    print("Running", command)
+    print("Running:", command)
     c.run(command)
 
 
@@ -91,6 +90,7 @@ def upload_job_folder_to_node(c, job, python_binary):
         os.path.join(glm.__path__[0], '..', 'jobs', job))
     golem_path = c.run(
         '{} -c "import golem as glm;import os; print(os.path.abspath(os.path.join(glm.__path__[0], \'..\')))"'.format(python_binary), hide=True).stdout.strip()
+    print('Uploading job folder...')
     patchwork.transfers.rsync(
         c, job_folder_path, golem_path + '/jobs/', exclude='__pycache__')
 
@@ -104,7 +104,7 @@ def find_rank_0_task(tasks):
 
 def main():
     args = parse_args()
-    print("GOLEM CLI")
+    print("===GOLEM CLI===")
     experiment_id = args.experiment_id
     job = args.job_name
     job_config_name = args.job_config
@@ -115,8 +115,6 @@ def main():
     print("Loading job config file from:", full_job_config_file)
     network_config = load_config_file(full_network_config_path)
     job_config = load_config_file(full_job_config_file)
-    print(network_config)
-    print(job_config)
     # 1) Determine the placement for each job based on the requirements
     placement = {}
     for node, config in network_config["nodes"].items():
@@ -141,13 +139,14 @@ def main():
             continue
         current_rank, current_worldsize, placement = fit_job_on_nodes(
             current_rank, current_worldsize, placement, task, config)
-    print(placement)
-    print(current_rank)
-    print(current_worldsize)
+    print(
+        f'Launching {current_worldsize} processes on {len(placement)} different nodes')
+    print('--Placement--')
+    print(yaml.dump(placement, allow_unicode=True, default_flow_style=False))
     # 2) Start all those jobs
     for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
         c = Connection(**host)
-        print('Running jobs on node', node)
+        print('Running Golem Launcher on node', node)
         for t in placement[node]['tasks']:
             if t['start_rank'] == 0:
                 # We don't run rank 0 yet
@@ -164,11 +163,12 @@ def main():
     try:
         # 3) Tail the logs of rank=0 on the master machine
         python_binary = network_config['nodes'][master_node]['python_binary']
+        print(f'Running Golem Launcer on {master_node}, the master node')
         upload_job_folder_to_node(c, job, python_binary)
         run_glm_launcher(c_master, experiment_id, job, job_config_name, rank_0_task, current_worldsize,
                          master_node_ip, master_node_port, python_binary, daemon=False)
     except KeyboardInterrupt:
-        print("KeyboardInterrupt!")
+        print('KeyboardInterrupt!')
         for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
             c = Connection(**host)
             print('Cleaning zombie processes on node', node)
