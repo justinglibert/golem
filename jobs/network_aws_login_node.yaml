@@ -1,7 +1,7 @@
 master_node:
   # Private ip address of the node
   ip: '172.31.46.28'
-  port: '121212'
+  port: '121214'
   name: gpu_worker_1
 nodes:
   cpu_worker_1:
@@ -19,7 +19,7 @@ nodes:
     hardware:
       cpus: 96
   gpu_worker_1:
-    host: '127.0.0.1'
+    host: '172.31.46.28'
     user: 'ubuntu'
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:
