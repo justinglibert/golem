@@ -101,7 +101,7 @@ def main():
             processes.append(process)
         with open(run_folder + '/pids', "a") as file_object:
             # Append 'hello' at the end of file
-            file_object.write(process.pid)
+            file_object.write(str(process.pid))
 
     if args.daemon:
         print(f"Running Golem as a deamon. pid={os.getpid()}")
