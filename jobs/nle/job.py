@@ -74,6 +74,8 @@ def _create_buffers(unroll_length, observation_space, num_actions, model):
 
 
 def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffers.DistributedBuffer, glm.servers.PushPullModelServer], cfg: DictConfig):
+    # TODO: Load the batch while you backward pass
+    # Could use Torch dataset
     print(cfg)
     logger = glm.utils.default_logger
     torch.set_num_threads(4)
@@ -104,11 +106,16 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
     impala_group.barrier()
     prof = glm.utils.SimpleProfiler()
     with prof(category="sleeping"):
-        while replay_buffer.all_size() < 10:
+        while replay_buffer.all_size() < B:
             sleep(0.1)
+
     for iteration in it.count():
         with prof(category="rpc"):
-            bsize, buffers = replay_buffer.sample_batch(B)
+            bsize, buffers = replay_buffer.sample_batch(B, 'actor', 8)
+            if bsize == 0:
+                logger.warning("Batch size is 0!")
+                sleep(1)
+                continue
         with prof(category="preprocessing"):
             keys = buffers[0].keys()
             batch = {
@@ -182,6 +189,14 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
                 model.parameters(), cfg.training.grad_norm_clipping)
             optimizer.step()
             scheduler.step()
+            if iteration % 5 == 0:
+                logger.info("{:.2f} steps sampled/s".format(impala_group.registered_sync("get_samples_collected") /
+                                                            impala_group.registered_sync("get_global_timer")))
+                logger.info("{:.2f} param updates/s".format(impala_group.registered_sync("get_parameter_updates") /
+                                                            impala_group.registered_sync("get_global_timer")))
+                logger.info("{:.2f} steps processed/s".format(impala_group.registered_sync("get_step_processed") /
+                                                              impala_group.registered_sync("get_global_timer")))
+                logger.info(prof)
 
         with prof(category="rpc"):
             server.push(model)
@@ -194,12 +209,12 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
                 break
 
     logger.info(prof)
-    logger.info("{} steps sampled/s".format(impala_group.registered_sync("get_samples_collected") /
-                                            impala_group.registered_sync("get_global_timer")))
-    logger.info("{} param updates/s".format(impala_group.registered_sync("get_parameter_updates") /
-                                            impala_group.registered_sync("get_global_timer")))
-    logger.info("{} steps processed/s".format(impala_group.registered_sync("get_step_processed") /
-                                              impala_group.registered_sync("get_global_timer")))
+    logger.info("{:.2f} steps sampled/s".format(impala_group.registered_sync("get_samples_collected") /
+                                                impala_group.registered_sync("get_global_timer")))
+    logger.info("{:.2f} param updates/s".format(impala_group.registered_sync("get_parameter_updates") /
+                                                impala_group.registered_sync("get_global_timer")))
+    logger.info("{:.2f} steps processed/s".format(impala_group.registered_sync("get_step_processed") /
+                                                  impala_group.registered_sync("get_global_timer")))
     # Have a barrier at the end to make sure everything is sync before exiting
     impala_group.barrier()
 

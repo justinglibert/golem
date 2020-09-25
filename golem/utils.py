@@ -72,8 +72,8 @@ class SimpleProfiler(object):
 
     def __repr__(self):
         total_time = time.time() - self.start
-        lines = "\n"
+        lines = "\nTotal time: {:.2f}s\n".format(total_time)
         for k in self.table.keys():
-            lines += "{}: {}s and {} percent of total time\n".format(
-                k, self.table[k] / 1000, self.table[k] / total_time * 100)
+            lines += "{}: {:.2f}s and {:.2f} percent of total time\n".format(
+                k, self.table[k], self.table[k] / total_time * 100)
         return lines

@@ -206,9 +206,14 @@ class DistributedBuffer(object):
 
     def sample_batch(self,
                      batch_size: int,
+                     task_name: str,
+                     batch_size_force_multiple: int = 1,
                      sample_method: Union[Callable, str] = "random_unique",
                      ) -> Any:
-        p_num = self.group.size()
+        # p_num = self.group.size()
+        filtered_group = list(
+            filter(lambda p: task_name in p, self.group.get_group_members()))
+        p_num = len(filtered_group)
         local_batch_size = _round_up(batch_size / p_num)
 
         future = [
@@ -216,12 +221,15 @@ class DistributedBuffer(object):
                 self.buffer_name + "/" + m + "/_sample_service",
                 args=(local_batch_size, sample_method)
             )
-            for m in self.group.get_group_members()
+            for m in filtered_group
         ]
 
         results = [fut.wait() for fut in future]
         all_batch_size = sum([r[0] for r in results])
         all_batch = list(it.chain(*[r[1] for r in results]))
+        reminder = all_batch_size % batch_size_force_multiple
+        all_batch_size -= reminder
+        all_batch = all_batch[:all_batch_size]
 
         return all_batch_size, all_batch
 
@@ -244,3 +252,17 @@ class DistributedBuffer(object):
                                                           batch_size)
 
         return local_batch_size, local_batch
+
+
+class DistributedBufferTorchDataset(torch.utils.data.IterableDataset):
+    def __init__(self, buffer: DistributedBuffer, **kwargs):
+        super(DistributedBufferTorchDataset, self).__init__()
+        self.buffer = buffer
+        self.kwargs = kwargs
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is None:  # single-process data loading, return the full iterator
+            print("Running in a single process! bad.")
+
+        return iter(lambda _: self.buffer.sample_batch(**self.kwargs), False)

@@ -1,6 +1,6 @@
 training:
   unroll_length: 80
-  batch_size: 128
+  batch_size: 8
   total_steps: 1000000000
   entropy_cost: 0.0006
   baseline_cost: 0.5
@@ -10,4 +10,4 @@ training:
   momentum: 0.0
   epsilon: 0.01
   grad_norm_clipping: 40.0
-  total_parameter_updates: 10000000
+  total_parameter_updates: 10
