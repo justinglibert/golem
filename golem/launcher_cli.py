@@ -81,7 +81,7 @@ def main():
         cmd.extend(['hydra.run.dir=' + home + '/golem/' + args.job_name + '/${now:%Y-%m-%d}/${now:%H-%M-%S}',
                     '--config-dir', './jobs/' + args.job_name + '/', '--config-name', args.job_config])
 
-        process = subprocess.Popen(cmd, env=current_env)
+        process = subprocess.Popen(cmd, env=current_env, stdout=None)
         processes.append(process)
 
     if args.daemon:

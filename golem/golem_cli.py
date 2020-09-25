@@ -66,7 +66,7 @@ def run_glm_launcher(c, job, config, tasks, world_size, master_ip, master_port, 
     task = tasks['task']
     golem_path = c.run(
         '{} -c "import golem as glm;import os; print(os.path.abspath(os.path.join(glm.__path__[0], \'..\')))"'.format(python_binary), hide=True).stdout.strip()
-    c.run(f'cd {golem_path} && {python_binary} -m golem.launcher_cli --master_addr {master_ip}'
+    c.run(f'cd {golem_path} && {python_binary} -m golem.launcher_cli --daemon --master_addr {master_ip}'
           f' --master_port {master_port} --nproc {processes} --current_rank {start_rank} --world_size {world_size} {job} {config} {task}')
 
 
@@ -111,12 +111,15 @@ def main():
     master_node_ip = network_config['master_node']['ip']
     master_node_port = network_config['master_node']['port']
     # 2) Start all those jobs
+    # TODO: Do this in parallel
     for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
         c = Connection(**host)
         print('Running jobs on node', node)
         for t in placement[node]['tasks']:
+            # TODO: Job sync using scp
             run_glm_launcher(
                 c, job, job_config_name, t, current_worldsize, master_node_ip, master_node_port, network_config['nodes'][node]['python_binary'])
+            print("Done!")
     # 3) Tail the logs of rank=0 on the master machine
 
 
