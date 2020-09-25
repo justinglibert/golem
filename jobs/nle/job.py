@@ -98,6 +98,7 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
     total_steps = cfg.training.total_steps
     device = torch.device(
         'cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    model = model.to(device)
 
     def lr_lambda(epoch):
         return 1 - min(epoch * T * B, total_steps) / total_steps
