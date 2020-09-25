@@ -155,6 +155,14 @@ def main():
                          master_node_ip, master_node_port, network_config['nodes'][master_node]['python_binary'], daemon=False)
     except KeyboardInterrupt:
         print("KeyboardInterrupt!")
+        for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
+            c = Connection(**host)
+            print('Cleaning zombie processes on node', node)
+            python_binary = network_config['nodes'][node]['python_binary']
+            pid_loc = f'~/golem/{job}/{experiment_id}/pids'
+            c.run(
+                "{} -c \"import os;f = open(os.path.expanduser('{}'), 'r');pids = f.read();[os.kill(int(p),2) for p in pids.split('\\n')[:-1]]\"".format(python_binary, pid_loc))
+
         sys.exit(1)
 
 
