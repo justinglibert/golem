@@ -11,3 +11,14 @@ training:
   epsilon: 0.01
   grad_norm_clipping: 40.0
   total_parameter_updates: 1000
+run:
+  force_rank_0: learner
+  tasks:
+    learner:
+      requirements:
+        cpus: 4
+      processes: 1
+    actor:
+      requirements:
+        cpus: 4
+      processes: 1 

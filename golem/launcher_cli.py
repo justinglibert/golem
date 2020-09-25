@@ -29,6 +29,8 @@ def parse_args():
                         help="Master node (rank 0)'s free port that needs to "
                              "be used for communication during distributed "
                              "training")
+    parser.add_argument("--daemon", action="store_true",
+                        help="Daemon mode")
 
     # positional
     parser.add_argument("job_name", type=str,
@@ -82,6 +84,9 @@ def main():
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)
 
+    if args.daemon:
+        print(f"Running Golem as a deamon. pid={os.getpid()}")
+        return
     for process in processes:
         process.wait()
         if process.returncode != 0:

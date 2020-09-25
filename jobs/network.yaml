@@ -1,0 +1,11 @@
+master_node:
+  # Private ip address of the node
+  ip: '172.31.46.28'
+  port: '121212'
+nodes:
+  local:
+    # host can also be a ssh host name
+    host: '127.0.0.1'
+    user: 'justinglibert'
+    hardware:
+      cpus: 8
