@@ -20,6 +20,8 @@ def parse_args():
                         help="Number of processes to launch on this node")
     parser.add_argument("--world_size", type=int, default=1,
                         help="The final world size")
+    parser.add_argument("--experiment_id", type=str,
+                        help="The experiment id")
     parser.add_argument("--master_addr", default="127.0.0.1", type=str,
                         help="Master node (rank 0)'s address, should be either "
                              "the IP address or the hostname of node 0, for "
@@ -78,14 +80,26 @@ def main():
 
         cmd.append('jobs.' + args.job_name + '.job')
         home = os.path.expanduser("~")
-        cmd.extend(['hydra.run.dir=' + home + '/golem/' + args.job_name + '/${now:%Y-%m-%d}/${now:%H-%M-%S}',
+
+        run_folder = home + '/golem/' + args.job_name + '/' + args.experiment_id
+        os.makedirs(run_folder, exist_ok=True)
+
+        cmd.extend(['hydra.run.dir=' + run_folder,
                     '--config-dir', './jobs/' + args.job_name + '/', '--config-name', args.job_config])
 
-        process = subprocess.Popen(cmd, env=current_env, stdout=None)
-        processes.append(process)
+        if args.daemon:
+            print(run_folder)
+            stdout = open(run_folder + f'/{local_rank}-{args.entry_point}.stdout.logs', 'w+')
+            stderr = open(run_folder + f'/{local_rank}-{args.entry_point}.stderr.logs', 'w+')
+            process = subprocess.Popen(cmd, env=current_env, stdout=stdout, stderr=stderr)
+            processes.append(process)
+        else:
+            process = subprocess.Popen(cmd, env=current_env)
+            processes.append(process)
 
     if args.daemon:
         print(f"Running Golem as a deamon. pid={os.getpid()}")
+        sys.exit(0)
         return
     for process in processes:
         process.wait()
