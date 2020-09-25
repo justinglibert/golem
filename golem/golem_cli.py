@@ -134,7 +134,6 @@ def main():
     print(current_rank)
     print(current_worldsize)
     # 2) Start all those jobs
-    # TODO: Do this in parallel
     for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
         c = Connection(**host)
         print('Running jobs on node', node)
@@ -149,8 +148,8 @@ def main():
     c_master = Connection(
         host=master_node_config['host'], user=master_node_config['user'])
     rank_0_task = find_rank_0_task(placement[master_node]['tasks'])
-    # 3) Tail the logs of rank=0 on the master machine
     try:
+        # 3) Tail the logs of rank=0 on the master machine
         run_glm_launcher(c_master, experiment_id, job, job_config_name, rank_0_task, current_worldsize,
                          master_node_ip, master_node_port, network_config['nodes'][master_node]['python_binary'], daemon=False)
     except KeyboardInterrupt:
@@ -161,7 +160,7 @@ def main():
             python_binary = network_config['nodes'][node]['python_binary']
             pid_loc = f'~/golem/{job}/{experiment_id}/pids'
             c.run(
-                "{} -c \"import os;f = open(os.path.expanduser('{}'), 'r');pids = f.read();[os.kill(int(p),2) for p in pids.split('\\n')[:-1]]\"".format(python_binary, pid_loc))
+                "{} -m golem.kill_pids {}".format(python_binary, pid_loc))
 
         sys.exit(1)
 

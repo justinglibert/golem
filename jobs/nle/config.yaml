@@ -16,9 +16,10 @@ run:
   tasks:
     learner:
       requirements:
-        cpus: 4
+        cpus: 8
+        gpus: 1
       processes: 1
     actor:
       requirements:
         cpus: 4
-      processes: 1 
+      processes: 23 
