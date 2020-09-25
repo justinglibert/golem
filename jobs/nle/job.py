@@ -198,6 +198,13 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
                                                             impala_group.registered_sync("get_global_timer")))
                 logger.info("{:.2f} steps processed/s".format(impala_group.registered_sync("get_step_processed") /
                                                               impala_group.registered_sync("get_global_timer")))
+
+                logger.info("total steps sampled = {:.2f}".format(
+                    impala_group.registered_sync("get_samples_collected")))
+                logger.info("total param updates = {:.2f}".format(
+                    impala_group.registered_sync("get_parameter_updates")))
+                logger.info("total steps processed = {:.2f}".format(
+                    impala_group.registered_sync("get_step_processed")))
                 logger.info(prof)
 
         with prof(category="rpc"):

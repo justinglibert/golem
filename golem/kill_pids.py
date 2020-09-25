@@ -8,7 +8,6 @@ for p in pids.split('\n'):
     pid = int(p)
     try:
         os.kill(pid, 2)
-    except Exception:
+    except Exception as e:
+        print(e)
         continue
-
-
