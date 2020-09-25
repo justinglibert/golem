@@ -8,6 +8,7 @@ from torch import nn
 from torch.nn import functional as F
 import time
 import itertools as it
+import os
 from time import sleep
 from .net import NetHackNet as Net
 from .env import create_env, ResettingEnvironment
@@ -76,13 +77,12 @@ def _create_buffers(unroll_length, observation_space, num_actions, model):
 def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffers.DistributedBuffer, glm.servers.PushPullModelServer], cfg: DictConfig):
     # TODO: Load the batch while you backward pass
     # Could use Torch dataset
-    print(cfg)
     logger = glm.utils.default_logger
     torch.set_num_threads(8)
     logger.info("Booting an Impala learner")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
-    env = create_env('NetHackScore-v0', savedir=None)
+    env = create_env(cfg.env.task, savedir=None)
     observation_space = env.observation_space
     action_space = env.action_space
     model = Net(observation_space, action_space.n, True)
@@ -101,6 +101,7 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
     model = model.to(device)
 
     def lr_lambda(epoch):
+        # This should also be multiplied by the amount of learner
         return 1 - min(epoch * T * B, total_steps) / total_steps
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
@@ -203,7 +204,7 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
             server.push(model)
             impala_group.registered_sync("increment_parameter_updates")
             impala_group.registered_sync("increment_step_processed")
-            if world.rank == 0 and impala_group.registered_sync("get_parameter_updates") > cfg.training.total_parameter_updates:
+            if world.rank == 0 and impala_group.registered_sync("get_step_processed") > cfg.training.total_steps:
                 impala_group.registered_sync("turn_global_switch_off")
                 break
             elif impala_group.registered_sync("get_global_switch") is False:
@@ -226,7 +227,8 @@ def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffe
     logger.info("Booting an Impala actor")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
-    env = create_env('NetHackScore-v0', savedir=None)
+    logger.info(f"Saving NLE data in {os.getcwd()}")
+    env = create_env(cfg.env.task, savedir=os.getcwd())
     observation_space = env.observation_space
     action_space = env.action_space
     env = ResettingEnvironment(env)
