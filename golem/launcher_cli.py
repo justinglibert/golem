@@ -86,6 +86,7 @@ def main():
 
     if args.daemon:
         print(f"Running Golem as a deamon. pid={os.getpid()}")
+        sys.exit(0)
         return
     for process in processes:
         process.wait()
