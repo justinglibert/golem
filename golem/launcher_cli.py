@@ -89,13 +89,19 @@ def main():
 
         if args.daemon:
             print(run_folder)
-            stdout = open(run_folder + f'/{local_rank}-{args.entry_point}.stdout.logs', 'w+')
-            stderr = open(run_folder + f'/{local_rank}-{args.entry_point}.stderr.logs', 'w+')
-            process = subprocess.Popen(cmd, env=current_env, stdout=stdout, stderr=stderr)
+            stdout = open(
+                run_folder + f'/{local_rank}-{args.entry_point}.stdout.logs', 'w+')
+            stderr = open(
+                run_folder + f'/{local_rank}-{args.entry_point}.stderr.logs', 'w+')
+            process = subprocess.Popen(
+                cmd, env=current_env, stdout=stdout, stderr=stderr)
             processes.append(process)
         else:
             process = subprocess.Popen(cmd, env=current_env)
             processes.append(process)
+        with open(run_folder + '/pids', "a") as file_object:
+            # Append 'hello' at the end of file
+            file_object.write(process.pid)
 
     if args.daemon:
         print(f"Running Golem as a deamon. pid={os.getpid()}")

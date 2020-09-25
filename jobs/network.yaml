@@ -1,11 +1,12 @@
 master_node:
   # Private ip address of the node
-  ip: '172.31.46.28'
+  ip: '127.0.0.1'
   port: '121212'
 nodes:
   local:
     # host can also be a ssh host name
     host: '127.0.0.1'
     user: 'justinglibert'
+    python_binary: '/Users/justinglibert/.pyenv/shims/python'
     hardware:
       cpus: 8
