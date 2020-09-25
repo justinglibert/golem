@@ -7,7 +7,7 @@ for p in pids.split('\n'):
         continue
     pid = int(p)
     try:
-        os.kill(pid)
+        os.kill(pid, 2)
     except Exception:
         continue
 
