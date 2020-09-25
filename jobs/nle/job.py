@@ -78,8 +78,8 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
     # Could use Torch dataset
     print(cfg)
     logger = glm.utils.default_logger
-    torch.set_num_threads(4)
-    logger.info("Booting an NLE learner")
+    torch.set_num_threads(8)
+    logger.info("Booting an Impala learner")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
     env = create_env('NetHackScore-v0', savedir=None)
@@ -223,7 +223,7 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
 def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffers.DistributedBuffer, glm.servers.PushPullModelServer], cfg: DictConfig):
     torch.set_num_threads(4)
     logger = glm.utils.default_logger
-    logger.info("Booting an NLE actor")
+    logger.info("Booting an Impala actor")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
     env = create_env('NetHackScore-v0', savedir=None)

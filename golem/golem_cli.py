@@ -8,6 +8,8 @@ import time
 import numpy as np
 from fabric import Connection
 from datetime import datetime
+import golem as glm
+import patchwork.transfers
 
 now = datetime.now()  # current date and time
 
@@ -84,6 +86,15 @@ def run_glm_launcher(c, experiment_id, job, config, tasks, world_size, master_ip
     c.run(command)
 
 
+def upload_job_folder_to_node(c, job, python_binary):
+    job_folder_path = os.path.abspath(
+        os.path.join(glm.__path__[0], '..', 'jobs', job))
+    golem_path = c.run(
+        '{} -c "import golem as glm;import os; print(os.path.abspath(os.path.join(glm.__path__[0], \'..\')))"'.format(python_binary), hide=True).stdout.strip()
+    patchwork.transfers.rsync(
+        c, job_folder_path, golem_path + '/jobs/', exclude='__pycache__')
+
+
 def find_rank_0_task(tasks):
     for t in tasks:
         if t['start_rank'] == 0:
@@ -141,8 +152,10 @@ def main():
             if t['start_rank'] == 0:
                 # We don't run rank 0 yet
                 continue
+            python_binary = network_config['nodes'][node]['python_binary']
+            upload_job_folder_to_node(c, job, python_binary)
             run_glm_launcher(
-                c, experiment_id, job, job_config_name, t, current_worldsize, master_node_ip, master_node_port, network_config['nodes'][node]['python_binary'])
+                c, experiment_id, job, job_config_name, t, current_worldsize, master_node_ip, master_node_port, python_binary)
             print("Done!")
     master_node_config = network_config['nodes'][master_node]
     c_master = Connection(
@@ -150,8 +163,10 @@ def main():
     rank_0_task = find_rank_0_task(placement[master_node]['tasks'])
     try:
         # 3) Tail the logs of rank=0 on the master machine
+        python_binary = network_config['nodes'][master_node]['python_binary']
+        upload_job_folder_to_node(c, job, python_binary)
         run_glm_launcher(c_master, experiment_id, job, job_config_name, rank_0_task, current_worldsize,
-                         master_node_ip, master_node_port, network_config['nodes'][master_node]['python_binary'], daemon=False)
+                         master_node_ip, master_node_port, python_binary, daemon=False)
     except KeyboardInterrupt:
         print("KeyboardInterrupt!")
         for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
@@ -162,7 +177,7 @@ def main():
             c.run(
                 "{} -m golem.kill_pids {}".format(python_binary, pid_loc))
 
-        sys.exit(1)
+        sys.exit(0)
 
 
 if __name__ == "__main__":

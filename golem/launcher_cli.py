@@ -59,10 +59,7 @@ def main():
 
     processes = []
 
-    print("GOLEM LAUNCHER")
-    print("World Size", args.world_size)
-    print("N proc", args.nproc)
-    print("Current rank", args.current_rank)
+    print("==GOLEM LAUNCHER==")
 
     for local_rank in range(0, args.nproc):
         # each process's rank
@@ -88,7 +85,6 @@ def main():
                     '--config-dir', './jobs/' + args.job_name + '/', '--config-name', args.job_config])
 
         if args.daemon:
-            print(run_folder)
             stdout = open(
                 run_folder + f'/{local_rank}-{args.entry_point}.stdout.logs', 'w+')
             stderr = open(
@@ -96,6 +92,8 @@ def main():
             process = subprocess.Popen(
                 cmd, env=current_env, stdout=stdout, stderr=stderr)
             processes.append(process)
+            print(
+                f"Running process {local_rank}-{args.entry_point} as a deamon. pid={process.pid}")
         else:
             process = subprocess.Popen(cmd, env=current_env)
             processes.append(process)
@@ -104,7 +102,6 @@ def main():
             file_object.write(str(process.pid) + '\n')
 
     if args.daemon:
-        print(f"Running Golem as a deamon. pid={os.getpid()}")
         sys.exit(0)
         return
     for process in processes:

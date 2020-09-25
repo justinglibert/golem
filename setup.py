@@ -62,6 +62,7 @@ setuptools.setup(
         "tensorboardX",
         "hydra-core",
         "PyYAML",
-        "fabric>=2.0.0"
+        "fabric>=2.0.0",
+        "patchwork"
     ]
 )
