@@ -297,7 +297,7 @@ def init(cfg: DictConfig):
         "impala", world.get_members())
     replay_buffer = glm.buffers.DistributedBuffer(
         buffer_name="buffer", group=impala_group,
-        buffer_size=200
+        buffer_size=20
     )
     server = glm.servers.model_server_helper(model_num=1)[0]
     # Counters and Switch
