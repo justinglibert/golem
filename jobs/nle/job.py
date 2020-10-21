@@ -14,6 +14,8 @@ from .net import NetHackNet as Net
 from .env import create_env, ResettingEnvironment
 from .vtrace import from_logits, from_importance_weights
 
+import tracemalloc
+
 
 def nested_map(f, n):
     if isinstance(n, tuple) or isinstance(n, list):
@@ -48,8 +50,7 @@ def compute_policy_gradient_loss(logits, actions, advantages):
 def _create_buffers(unroll_length, observation_space, num_actions, model):
     # Get specimens to infer shapes and dtypes.
     size = (unroll_length + 1,)
-    samples = {k: torch.from_numpy(v)
-               for k, v in observation_space.sample().items()}
+    samples = {k: torch.from_numpy(v) for k, v in observation_space.sample().items()}
 
     specs = {
         key: dict(size=size + sample.shape, dtype=sample.dtype)
@@ -74,7 +75,15 @@ def _create_buffers(unroll_length, observation_space, num_actions, model):
     return buffers
 
 
-def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffers.DistributedBuffer, glm.servers.PushPullModelServer], cfg: DictConfig):
+def learner(
+    init: Tuple[
+        glm.distributed.World,
+        glm.distributed.RpcGroup,
+        glm.buffers.DistributedBuffer,
+        glm.servers.PushPullModelServer,
+    ],
+    cfg: DictConfig,
+):
     # TODO: Load the batch while you backward pass
     # Could use Torch dataset
     logger = glm.utils.default_logger
@@ -96,8 +105,9 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
     )
     B, T = cfg.training.batch_size, cfg.training.unroll_length
     total_steps = cfg.training.total_steps
-    device = torch.device(
-        'cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    device = (
+        torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    )
     model = model.to(device)
 
     def lr_lambda(epoch):
@@ -113,7 +123,7 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
 
     for iteration in it.count():
         with prof(category="rpc"):
-            bsize, buffers = replay_buffer.sample_batch(B, 'actor', 8)
+            bsize, buffers = replay_buffer.sample_batch(B, "actor", 8)
             if bsize == 0:
                 logger.warning("Batch size is 0!")
                 sleep(1)
@@ -121,14 +131,18 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
         with prof(category="preprocessing"):
             keys = buffers[0].keys()
             batch = {
-                key: torch.stack([buffers[m][key] for m in range(bsize)], dim=1) for key in list(filter(lambda k: k != "initial_agent_state", keys))
+                key: torch.stack([buffers[m][key] for m in range(bsize)], dim=1)
+                for key in list(filter(lambda k: k != "initial_agent_state", keys))
             }
             initial_agent_state = (
                 torch.cat(ts, dim=1)
-                for ts in zip(*[buffers[m]["initial_agent_state"] for m in range(bsize)])
+                for ts in zip(
+                    *[buffers[m]["initial_agent_state"] for m in range(bsize)]
+                )
             )
-            batch = {k: t.to(device=device, non_blocking=True)
-                     for k, t in batch.items()}
+            batch = {
+                k: t.to(device=device, non_blocking=True) for k, t in batch.items()
+            }
             initial_agent_state = tuple(
                 t.to(device=device, non_blocking=True) for t in initial_agent_state
             )
@@ -141,8 +155,9 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
 
             # Move from obs[t] -> action[t] to action[t] -> obs[t].
             batch = {key: tensor[1:] for key, tensor in batch.items()}
-            learner_outputs = {key: tensor[:-1]
-                               for key, tensor in learner_outputs.items()}
+            learner_outputs = {
+                key: tensor[:-1] for key, tensor in learner_outputs.items()
+            }
 
             rewards = batch["reward"]
             clipped_rewards = torch.clamp(rewards, -1, 1)
@@ -188,47 +203,94 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
             optimizer.zero_grad()
             total_loss.backward()
             nn.utils.clip_grad_norm_(
-                model.parameters(), cfg.training.grad_norm_clipping)
+                model.parameters(), cfg.training.grad_norm_clipping
+            )
             optimizer.step()
             scheduler.step()
             if iteration % 5 == 0:
-                logger.info("{:.2f} steps sampled/s".format(impala_group.registered_sync("get_samples_collected") /
-                                                            impala_group.registered_sync("get_global_timer")))
-                logger.info("{:.2f} param updates/s".format(impala_group.registered_sync("get_parameter_updates") /
-                                                            impala_group.registered_sync("get_global_timer")))
-                logger.info("{:.2f} steps processed/s".format(impala_group.registered_sync("get_step_processed") /
-                                                              impala_group.registered_sync("get_global_timer")))
+                logger.info(
+                    "{:.2f} steps sampled/s".format(
+                        impala_group.registered_sync("get_samples_collected")
+                        / impala_group.registered_sync("get_global_timer")
+                    )
+                )
+                logger.info(
+                    "{:.2f} param updates/s".format(
+                        impala_group.registered_sync("get_parameter_updates")
+                        / impala_group.registered_sync("get_global_timer")
+                    )
+                )
+                logger.info(
+                    "{:.2f} steps processed/s".format(
+                        impala_group.registered_sync("get_step_processed")
+                        / impala_group.registered_sync("get_global_timer")
+                    )
+                )
 
-                logger.info("total steps sampled = {:.2f}".format(
-                    impala_group.registered_sync("get_samples_collected")))
-                logger.info("total param updates = {:.2f}".format(
-                    impala_group.registered_sync("get_parameter_updates")))
-                logger.info("total steps processed = {:.2f}".format(
-                    impala_group.registered_sync("get_step_processed")))
+                logger.info(
+                    "total steps sampled = {:.2f}".format(
+                        impala_group.registered_sync("get_samples_collected")
+                    )
+                )
+                logger.info(
+                    "total param updates = {:.2f}".format(
+                        impala_group.registered_sync("get_parameter_updates")
+                    )
+                )
+                logger.info(
+                    "total steps processed = {:.2f}".format(
+                        impala_group.registered_sync("get_step_processed")
+                    )
+                )
                 logger.info(prof)
 
         with prof(category="rpc"):
             server.push(model)
             impala_group.registered_sync("increment_parameter_updates")
             impala_group.registered_sync("increment_step_processed")
-            if world.rank == 0 and impala_group.registered_sync("get_step_processed") > cfg.training.total_steps:
+            if (
+                world.rank == 0
+                and impala_group.registered_sync("get_step_processed")
+                > cfg.training.total_steps
+            ):
                 impala_group.registered_sync("turn_global_switch_off")
                 break
             elif impala_group.registered_sync("get_global_switch") is False:
                 break
 
     logger.info(prof)
-    logger.info("{:.2f} steps sampled/s".format(impala_group.registered_sync("get_samples_collected") /
-                                                impala_group.registered_sync("get_global_timer")))
-    logger.info("{:.2f} param updates/s".format(impala_group.registered_sync("get_parameter_updates") /
-                                                impala_group.registered_sync("get_global_timer")))
-    logger.info("{:.2f} steps processed/s".format(impala_group.registered_sync("get_step_processed") /
-                                                  impala_group.registered_sync("get_global_timer")))
+    logger.info(
+        "{:.2f} steps sampled/s".format(
+            impala_group.registered_sync("get_samples_collected")
+            / impala_group.registered_sync("get_global_timer")
+        )
+    )
+    logger.info(
+        "{:.2f} param updates/s".format(
+            impala_group.registered_sync("get_parameter_updates")
+            / impala_group.registered_sync("get_global_timer")
+        )
+    )
+    logger.info(
+        "{:.2f} steps processed/s".format(
+            impala_group.registered_sync("get_step_processed")
+            / impala_group.registered_sync("get_global_timer")
+        )
+    )
     # Have a barrier at the end to make sure everything is sync before exiting
     impala_group.barrier()
 
 
-def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffers.DistributedBuffer, glm.servers.PushPullModelServer], cfg: DictConfig):
+def actor(
+    init: Tuple[
+        glm.distributed.World,
+        glm.distributed.RpcGroup,
+        glm.buffers.DistributedBuffer,
+        glm.servers.PushPullModelServer,
+    ],
+    cfg: DictConfig,
+):
+    tracemalloc.start(10)
     torch.set_num_threads(4)
     logger = glm.utils.default_logger
     logger.info("Booting an Impala actor")
@@ -241,7 +303,8 @@ def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffe
     env = ResettingEnvironment(env)
     model = Net(observation_space, action_space.n, True)
     buffers = _create_buffers(
-        cfg.training.unroll_length, observation_space, action_space.n, model)
+        cfg.training.unroll_length, observation_space, action_space.n, model
+    )
     env_output = env.initial()
     agent_state = model.initial_state(batch_size=1)
     agent_output, unused_state = model(env_output, agent_state)
@@ -288,16 +351,16 @@ def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffe
     logger.info(prof)
     # Have a barrier at the end to make sure everything is sync before exiting
     impala_group.barrier()
+    snapshot = tracemalloc.take_snapshot()
+    print(snapshot)
 
 
 def init(cfg: DictConfig):
     logger = glm.utils.default_logger
     world = glm.distributed.create_world_with_env()
-    impala_group = world.create_rpc_group(
-        "impala", world.get_members())
+    impala_group = world.create_rpc_group("impala", world.get_members())
     replay_buffer = glm.buffers.DistributedBuffer(
-        buffer_name="buffer", group=impala_group,
-        buffer_size=20
+        buffer_name="buffer", group=impala_group, buffer_size=20
     )
     server = glm.servers.model_server_helper(model_num=1)[0]
     # Counters and Switch
@@ -305,25 +368,23 @@ def init(cfg: DictConfig):
         logger.info("I am the rank 0. Creating counters")
 
         sample_counter = glm.widgets.Counter(step=80)
-        impala_group.register(
-            "increment_sample_collected", sample_counter.count)
+        impala_group.register("increment_sample_collected", sample_counter.count)
         impala_group.register("get_samples_collected", sample_counter.get)
 
         parameter_update_counter = glm.widgets.Counter(step=1)
         impala_group.register(
-            "increment_parameter_updates", parameter_update_counter.count)
-        impala_group.register("get_parameter_updates",
-                              parameter_update_counter.get)
+            "increment_parameter_updates", parameter_update_counter.count
+        )
+        impala_group.register("get_parameter_updates", parameter_update_counter.get)
 
         step_processed_counter = glm.widgets.Counter(
-            step=cfg.training.batch_size * cfg.training.unroll_length)
-        impala_group.register(
-            "increment_step_processed", step_processed_counter.count)
+            step=cfg.training.batch_size * cfg.training.unroll_length
+        )
+        impala_group.register("increment_step_processed", step_processed_counter.count)
         impala_group.register("get_step_processed", step_processed_counter.get)
 
         global_switch = glm.widgets.Switch(state=True)
-        impala_group.register(
-            "turn_global_switch_off", global_switch.off)
+        impala_group.register("turn_global_switch_off", global_switch.off)
         impala_group.register("get_global_switch", global_switch.get)
 
         global_timer = glm.widgets.Timer()
