@@ -8,7 +8,6 @@ from torch import nn
 from torch.nn import functional as F
 import time
 import itertools as it
-import os
 from time import sleep
 from .net import NetHackNet as Net
 from .env import create_env, ResettingEnvironment
@@ -77,12 +76,13 @@ def _create_buffers(unroll_length, observation_space, num_actions, model):
 def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffers.DistributedBuffer, glm.servers.PushPullModelServer], cfg: DictConfig):
     # TODO: Load the batch while you backward pass
     # Could use Torch dataset
+    print(cfg)
     logger = glm.utils.default_logger
-    torch.set_num_threads(8)
-    logger.info("Booting an Impala learner")
+    torch.set_num_threads(4)
+    logger.info("Booting an NLE learner")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
-    env = create_env(cfg.env.task, savedir=None)
+    env = create_env('NetHackScore-v0', savedir=None)
     observation_space = env.observation_space
     action_space = env.action_space
     model = Net(observation_space, action_space.n, True)
@@ -101,7 +101,6 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
     model = model.to(device)
 
     def lr_lambda(epoch):
-        # This should also be multiplied by the amount of learner
         return 1 - min(epoch * T * B, total_steps) / total_steps
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
@@ -112,7 +111,7 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
             sleep(0.1)
 
     for iteration in it.count():
-        with prof(category="rpc-sample"):
+        with prof(category="rpc"):
             bsize, buffers = replay_buffer.sample_batch(B, 'actor', 8)
             if bsize == 0:
                 logger.warning("Batch size is 0!")
@@ -198,20 +197,13 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
                                                             impala_group.registered_sync("get_global_timer")))
                 logger.info("{:.2f} steps processed/s".format(impala_group.registered_sync("get_step_processed") /
                                                               impala_group.registered_sync("get_global_timer")))
-
-                logger.info("total steps sampled = {:.2f}".format(
-                    impala_group.registered_sync("get_samples_collected")))
-                logger.info("total param updates = {:.2f}".format(
-                    impala_group.registered_sync("get_parameter_updates")))
-                logger.info("total steps processed = {:.2f}".format(
-                    impala_group.registered_sync("get_step_processed")))
                 logger.info(prof)
 
-        with prof(category="rpc-parameter-server"):
+        with prof(category="rpc"):
             server.push(model)
             impala_group.registered_sync("increment_parameter_updates")
             impala_group.registered_sync("increment_step_processed")
-            if world.rank == 0 and impala_group.registered_sync("get_step_processed") > cfg.training.total_steps:
+            if world.rank == 0 and impala_group.registered_sync("get_parameter_updates") > cfg.training.total_parameter_updates:
                 impala_group.registered_sync("turn_global_switch_off")
                 break
             elif impala_group.registered_sync("get_global_switch") is False:
@@ -231,11 +223,10 @@ def learner(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buf
 def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffers.DistributedBuffer, glm.servers.PushPullModelServer], cfg: DictConfig):
     torch.set_num_threads(4)
     logger = glm.utils.default_logger
-    logger.info("Booting an Impala actor")
+    logger.info("Booting an NLE actor")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
-    logger.info(f"Saving NLE data in {os.getcwd()}")
-    env = create_env(cfg.env.task, savedir=os.getcwd())
+    env = create_env('NetHackScore-v0', savedir=None)
     observation_space = env.observation_space
     action_space = env.action_space
     env = ResettingEnvironment(env)
@@ -275,11 +266,10 @@ def actor(init: Tuple[glm.distributed.World, glm.distributed.RpcGroup, glm.buffe
 
         with prof(category="replay_buffer"):
             replay_buffer.append(buffers)
-        with prof(category="rpc-pulling"):
+        with prof(category="rpc"):
             impala_group.registered_sync("increment_sample_collected")
-            if iteration % 10 == 0:
+            if iteration % 5 == 0:
                 logger.info("Pulling model....")
-                logger.info(prof)
                 server.pull(model)
 
         with prof(category="rpc"):
@@ -298,7 +288,7 @@ def init(cfg: DictConfig):
         "impala", world.get_members())
     replay_buffer = glm.buffers.DistributedBuffer(
         buffer_name="buffer", group=impala_group,
-        buffer_size=20
+        buffer_size=200
     )
     server = glm.servers.model_server_helper(model_num=1)[0]
     # Counters and Switch
