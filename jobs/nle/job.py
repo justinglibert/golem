@@ -74,6 +74,22 @@ def _create_buffers(unroll_length, observation_space, num_actions, model):
 
     return buffers
 
+def print_trace(snap, top):
+    top_stats = snap.statistics('lineno')
+
+    print(f"[ Top {top} ]")
+    for stat in top_stats[:top]:
+            print(stat)
+
+def collect_stats(snapshots):
+    snapshots.append(tracemalloc.take_snapshot())        
+    if len(snapshots) > 3: 
+        stats = snapshots[-1].compare_to(snapshots[-2], 'filename')    
+        for stat in stats[:10]:                
+            print("{} new KiB {} total KiB {} new {} total memory blocks: ".format(stat.size_diff/1024, stat.size / 1024, stat.count_diff ,stat.count))                
+            for line in stat.traceback.format():                    
+                print(line)
+    return snapshots
 
 def learner(
     init: Tuple[
@@ -291,6 +307,7 @@ def actor(
     cfg: DictConfig,
 ):
     tracemalloc.start(10)
+    snapshots = []
     torch.set_num_threads(4)
     logger = glm.utils.default_logger
     logger.info("Booting an Impala actor")
@@ -313,13 +330,13 @@ def actor(
     server.pull(model)
     for iteration in it.count():
         # Write old rollout end.
-        with prof(category="buffer"):
-            for key in env_output:
-                buffers[key][0, ...] = env_output[key]
-            for key in agent_output:
-                buffers[key][0, ...] = agent_output[key]
-            for i, tensor in enumerate(agent_state):
-                buffers["initial_agent_state"][i][...] = tensor
+        #with prof(category="buffer"):
+        #    for key in env_output:
+        #        buffers[key][0, ...] = env_output[key]
+        #    for key in agent_output:
+        #        buffers[key][0, ...] = agent_output[key]
+        #    for i, tensor in enumerate(agent_state):
+        #        buffers["initial_agent_state"][i][...] = tensor
 
         # Do new rollout.
         for t in range(cfg.training.unroll_length):
@@ -330,14 +347,14 @@ def actor(
             with prof(category="env"):
                 env_output = env.step(agent_output["action"])
 
-            with prof(category="buffer"):
-                for key in env_output:
-                    buffers[key][t + 1, ...] = env_output[key]
-                for key in agent_output:
-                    buffers[key][t + 1, ...] = agent_output[key]
+            #with prof(category="buffer"):
+            #    for key in env_output:
+            #        buffers[key][t + 1, ...] = env_output[key]
+            #    for key in agent_output:
+            #        buffers[key][t + 1, ...] = agent_output[key]
 
-        with prof(category="replay_buffer"):
-            replay_buffer.append(buffers)
+    #    with prof(category="replay_buffer"):
+    #        replay_buffer.append(buffers)
         with prof(category="rpc-pulling"):
             impala_group.registered_sync("increment_sample_collected")
             if iteration % 10 == 0:
@@ -352,8 +369,6 @@ def actor(
     logger.info(prof)
     # Have a barrier at the end to make sure everything is sync before exiting
     impala_group.barrier()
-    snapshot = tracemalloc.take_snapshot()
-    print(snapshot)
 
 
 def init(cfg: DictConfig):
