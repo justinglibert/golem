@@ -122,13 +122,8 @@ def learner(
             sleep(0.1)
 
     for iteration in it.count():
-<<<<<<< HEAD
         with prof(category="rpc-sample"):
             bsize, buffers = replay_buffer.sample_batch(B, 'actor', 8)
-=======
-        with prof(category="rpc"):
-            bsize, buffers = replay_buffer.sample_batch(B, "actor", 8)
->>>>>>> b06084083ce9d1fc8a227626c05b3267231b378d
             if bsize == 0:
                 logger.warning("Batch size is 0!")
                 sleep(1)
@@ -366,12 +361,8 @@ def init(cfg: DictConfig):
     world = glm.distributed.create_world_with_env()
     impala_group = world.create_rpc_group("impala", world.get_members())
     replay_buffer = glm.buffers.DistributedBuffer(
-<<<<<<< HEAD
         buffer_name="buffer", group=impala_group,
         buffer_size=20
-=======
-        buffer_name="buffer", group=impala_group, buffer_size=20
->>>>>>> b06084083ce9d1fc8a227626c05b3267231b378d
     )
     server = glm.servers.model_server_helper(model_num=1)[0]
     # Counters and Switch
