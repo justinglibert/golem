@@ -18,6 +18,20 @@ nodes:
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:
       cpus: 92
+  cpu_worker_3:
+    # host can also be a ssh host name
+    host: '172.31.46.78'
+    user: 'ubuntu'
+    python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
+    hardware:
+      cpus: 92
+  cpu_worker_4:
+    # host can also be a ssh host name
+    host: '172.31.35.138'
+    user: 'ubuntu'
+    python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
+    hardware:
+      cpus: 92
   gpu_worker_1:
     host: '172.31.46.28'
     user: 'ubuntu'

@@ -12,7 +12,7 @@ import os
 from time import sleep
 from .net import AtariNet as Net
 from .vtrace import from_logits, from_importance_weights
-from .atari_wrappers import wrap_pytorch, wrap_deepmind, wrap_atari
+from .atari_wrappers import wrap_pytorch, wrap_deepmind, make_atari
 from .environment import Environment
 import tracemalloc
 
@@ -50,13 +50,8 @@ def compute_policy_gradient_loss(logits, actions, advantages):
 def _create_buffers(unroll_length, observation_space, num_actions, initial_state):
     # Get specimens to infer shapes and dtypes.
     size = (unroll_length + 1,)
-    samples = {k: torch.from_numpy(v) for k, v in observation_space.sample().items()}
-
-    specs = {
-        key: dict(size=size + sample.shape, dtype=sample.dtype)
-        for key, sample in samples.items()
-    }
-    specs.update(
+    specs = dict(
+        frame=dict(size=size + observation_space.shape, dtype=torch.uint8),
         reward=dict(size=size, dtype=torch.float32),
         done=dict(size=size, dtype=torch.bool),
         episode_return=dict(size=size, dtype=torch.float32),
@@ -103,11 +98,12 @@ def learner(
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
     logger.info("Env: " + str(cfg.env.task))
-    env = create_env(cfg.env.task)
-    observation_space = env.observation_space
-    action_space = env.action_space
-    model = Net(observation_space, action_space.n, cfg.model.lstm)
-    del env
+    gym_env = create_env(cfg.env.task)
+    observation_space = gym_env.observation_space
+    action_space = gym_env.action_space
+    model = Net(observation_space.shape, action_space.n, cfg.model.lstm)
+    model.train()
+    del gym_env
     optimizer = torch.optim.RMSprop(
         model.parameters(),
         lr=cfg.training.learning_rate,
@@ -131,7 +127,8 @@ def learner(
     prof = glm.utils.SimpleProfiler()
     with prof(category="sleeping"):
         while replay_buffer.all_size() < B:
-            sleep(0.1)
+            logger.info(f"The size of the replay buffer ({replay_buffer.all_size()}) is smaller then {B}. Waiting...")
+            sleep(5)
 
     for iteration in it.count():
         with prof(category="rpc-sample"):
@@ -218,8 +215,8 @@ def learner(
                 model.parameters(), cfg.training.grad_norm_clipping
             )
             optimizer.step()
-            scheduler.step()
-            if iteration % 5 == 0:
+            #scheduler.step()
+            if iteration % 10 == 0:
                 logger.info(
                     "{:.2f} steps sampled/s".format(
                         impala_group.registered_sync("get_samples_collected")
@@ -302,7 +299,7 @@ def actor(
     ],
     cfg: DictConfig,
 ):
-    torch.set_num_threads(4)
+    torch.set_num_threads(2)
     logger = glm.utils.default_logger
     logger.info("Booting an Impala actor")
     world, impala_group, replay_buffer, server = init
@@ -312,9 +309,10 @@ def actor(
     seed = world.rank ^ int.from_bytes(os.urandom(4), byteorder="little")
     gym_env.seed(seed)
     env = Environment(gym_env)
-    observation_space = env.observation_space
-    action_space = env.action_space
-    model = Net(observation_space, action_space.n, cfg.model.lstm)
+    observation_space = gym_env.observation_space
+    action_space = gym_env.action_space
+    model = Net(observation_space.shape, action_space.n, cfg.model.lstm)
+    model.train()
     env_output = env.initial()
     agent_state = model.initial_state(batch_size=1)
     agent_output, unused_state = model(env_output, agent_state)
@@ -326,7 +324,7 @@ def actor(
     )
     for iteration in it.count():
         # Reset the buffers to prevent the memory leak
-        if iteration % 10 == 0:
+        if iteration % 100 == 0:
             with prof(category="recreating_buffers"):
                 del buffers
                 buffers = _create_buffers(
@@ -363,10 +361,11 @@ def actor(
             replay_buffer.append(buffers)
         with prof(category="rpc-pulling"):
             impala_group.registered_sync("increment_sample_collected")
-            if iteration % 10 == 0:
+            if iteration % 20 == 0:
                 logger.info("Pulling model....")
                 logger.info(prof)
                 server.pull(model)
+                logger.info("Done!")
 
         with prof(category="rpc"):
             if impala_group.registered_sync("get_global_switch") is False:
@@ -382,7 +381,7 @@ def init(cfg: DictConfig):
     world = glm.distributed.create_world_with_env()
     impala_group = world.create_rpc_group("impala", world.get_members())
     replay_buffer = glm.buffers.DistributedBuffer(
-        buffer_name="buffer", group=impala_group, buffer_size=20
+        buffer_name="buffer", group=impala_group, buffer_size=50
     )
     server = glm.servers.model_server_helper(model_num=1)[0]
     # Counters and Switch
