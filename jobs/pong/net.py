@@ -75,203 +75,64 @@ class Crop(nn.Module):
         )
 
 
-class NetHackNet(nn.Module):
-    def __init__(
-        self,
-        observation_shape,
-        num_actions,
-        use_lstm,
-        embedding_dim=32,
-        crop_dim=9,
-        num_layers=5,
-    ):
-        super(NetHackNet, self).__init__()
-
-        self.glyph_shape = observation_shape["glyphs"].shape
-        self.blstats_size = observation_shape["blstats"].shape[0]
-
+class AtariNet(nn.Module):
+    def __init__(self, observation_shape, num_actions, use_lstm=False):
+        super(AtariNet, self).__init__()
+        self.observation_shape = observation_shape
         self.num_actions = num_actions
+
+        # Feature extraction.
+        self.conv1 = nn.Conv2d(
+            in_channels=self.observation_shape[0],
+            out_channels=32,
+            kernel_size=8,
+            stride=4,
+        )
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
+
+        # Fully connected layer.
+        self.fc = nn.Linear(3136, 512)
+
+        # FC output size + one-hot of last action + last reward.
+        core_output_size = self.fc.out_features + num_actions + 1
+
         self.use_lstm = use_lstm
+        if use_lstm:
+            self.core = nn.LSTM(core_output_size, core_output_size, 2)
 
-        self.H = self.glyph_shape[0]
-        self.W = self.glyph_shape[1]
+        self.policy = nn.Linear(core_output_size, self.num_actions)
+        self.baseline = nn.Linear(core_output_size, 1)
 
-        self.k_dim = embedding_dim
-        self.h_dim = 512
-
-        self.crop_dim = crop_dim
-
-        self.crop = Crop(self.H, self.W, self.crop_dim, self.crop_dim)
-
-        self.embed = nn.Embedding(nethack.MAX_GLYPH, self.k_dim)
-
-        K = embedding_dim  # number of input filters
-        F = 3  # filter dimensions
-        S = 1  # stride
-        P = 1  # padding
-        M = 16  # number of intermediate filters
-        Y = 8  # number of output filters
-        L = num_layers  # number of convnet layers
-
-        in_channels = [K] + [M] * (L - 1)
-        out_channels = [M] * (L - 1) + [Y]
-
-        def interleave(xs, ys):
-            return [val for pair in zip(xs, ys) for val in pair]
-
-        conv_extract = [
-            nn.Conv2d(
-                in_channels=in_channels[i],
-                out_channels=out_channels[i],
-                kernel_size=(F, F),
-                stride=S,
-                padding=P,
-            )
-            for i in range(L)
-        ]
-
-        self.extract_representation = nn.Sequential(
-            *interleave(conv_extract, [nn.ELU()] * len(conv_extract))
-        )
-
-        # CNN crop model.
-        conv_extract_crop = [
-            nn.Conv2d(
-                in_channels=in_channels[i],
-                out_channels=out_channels[i],
-                kernel_size=(F, F),
-                stride=S,
-                padding=P,
-            )
-            for i in range(L)
-        ]
-
-        self.extract_crop_representation = nn.Sequential(
-            *interleave(conv_extract_crop, [nn.ELU()] * len(conv_extract))
-        )
-
-        out_dim = self.k_dim
-        # CNN over full glyph map
-        out_dim += self.H * self.W * Y
-
-        # CNN crop model.
-        out_dim += self.crop_dim ** 2 * Y
-
-        self.embed_blstats = nn.Sequential(
-            nn.Linear(self.blstats_size, self.k_dim),
-            nn.ReLU(),
-            nn.Linear(self.k_dim, self.k_dim),
-            nn.ReLU(),
-        )
-
-        self.fc = nn.Sequential(
-            nn.Linear(out_dim, self.h_dim),
-            nn.ReLU(),
-            nn.Linear(self.h_dim, self.h_dim),
-            nn.ReLU(),
-        )
-
-        if self.use_lstm:
-            self.core = nn.LSTM(self.h_dim, self.h_dim, num_layers=1)
-
-        self.policy = nn.Linear(self.h_dim, self.num_actions)
-        self.baseline = nn.Linear(self.h_dim, 1)
-
-    def initial_state(self, batch_size=1):
+    def initial_state(self, batch_size):
         if not self.use_lstm:
             return tuple()
         return tuple(
-            torch.zeros(self.core.num_layers, batch_size,
-                        self.core.hidden_size)
+            torch.zeros(self.core.num_layers, batch_size, self.core.hidden_size)
             for _ in range(2)
         )
 
-    def _select(self, embed, x):
-        # Work around slow backward pass of nn.Embedding, see
-        # https://github.com/pytorch/pytorch/issues/24912
-        out = embed.weight.index_select(0, x.reshape(-1))
-        return out.reshape(x.shape + (-1,))
+    def forward(self, inputs, core_state=()):
+        x = inputs["frame"]  # [T, B, C, H, W].
+        T, B, *_ = x.shape
+        x = torch.flatten(x, 0, 1)  # Merge time and batch.
+        x = x.float() / 255.0
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = x.view(T * B, -1)
+        x = F.relu(self.fc(x))
 
-    def forward(self, env_outputs, core_state):
-        # -- [T x B x H x W]
-        glyphs = env_outputs["glyphs"]
-
-        # -- [T x B x F]
-        blstats = env_outputs["blstats"]
-
-        T, B, *_ = glyphs.shape
-
-        # -- [B' x H x W]
-        glyphs = torch.flatten(glyphs, 0, 1)  # Merge time and batch.
-
-        # -- [B' x F]
-        blstats = blstats.view(T * B, -1).float()
-
-        # -- [B x H x W]
-        glyphs = glyphs.long()
-        # -- [B x 2] x,y coordinates
-        coordinates = blstats[:, :2]
-        # TODO ???
-        # coordinates[:, 0].add_(-1)
-
-        # -- [B x F]
-        # FIXME: hack to use compatible blstats to before
-        # blstats = blstats[:, [0, 1, 21, 10, 11]]
-
-        blstats = blstats.view(T * B, -1).float()
-        # -- [B x K]
-        blstats_emb = self.embed_blstats(blstats)
-
-        assert blstats_emb.shape[0] == T * B
-
-        reps = [blstats_emb]
-
-        # -- [B x H' x W']
-        crop = self.crop(glyphs, coordinates)
-
-        # print("crop", crop)
-        # print("at_xy", glyphs[:, coordinates[:, 1].long(), coordinates[:, 0].long()])
-
-        # -- [B x H' x W' x K]
-        crop_emb = self._select(self.embed, crop)
-
-        # CNN crop model.
-        # -- [B x K x W' x H']
-        crop_emb = crop_emb.transpose(1, 3)  # -- TODO: slow?
-        # -- [B x W' x H' x K]
-        crop_rep = self.extract_crop_representation(crop_emb)
-
-        # -- [B x K']
-        crop_rep = crop_rep.view(T * B, -1)
-        assert crop_rep.shape[0] == T * B
-
-        reps.append(crop_rep)
-
-        # -- [B x H x W x K]
-        glyphs_emb = self._select(self.embed, glyphs)
-        # glyphs_emb = self.embed(glyphs)
-        # -- [B x K x W x H]
-        glyphs_emb = glyphs_emb.transpose(1, 3)  # -- TODO: slow?
-        # -- [B x W x H x K]
-        glyphs_rep = self.extract_representation(glyphs_emb)
-
-        # -- [B x K']
-        glyphs_rep = glyphs_rep.view(T * B, -1)
-
-        assert glyphs_rep.shape[0] == T * B
-
-        # -- [B x K'']
-        reps.append(glyphs_rep)
-
-        st = torch.cat(reps, dim=1)
-
-        # -- [B x K]
-        st = self.fc(st)
+        one_hot_last_action = F.one_hot(
+            inputs["last_action"].view(T * B), self.num_actions
+        ).float()
+        clipped_reward = torch.clamp(inputs["reward"], -1, 1).view(T * B, 1)
+        core_input = torch.cat([x, clipped_reward, one_hot_last_action], dim=-1)
 
         if self.use_lstm:
-            core_input = st.view(T, B, -1)
+            core_input = core_input.view(T, B, -1)
             core_output_list = []
-            notdone = (~env_outputs["done"]).float()
+            notdone = (~inputs["done"]).float()
             for input, nd in zip(core_input.unbind(), notdone.unbind()):
                 # Reset core state to zero whenever an episode ended.
                 # Make `done` broadcastable with (num_layers, B, hidden_size)
@@ -282,16 +143,14 @@ class NetHackNet(nn.Module):
                 core_output_list.append(output)
             core_output = torch.flatten(torch.cat(core_output_list), 0, 1)
         else:
-            core_output = st
+            core_output = core_input
+            core_state = tuple()
 
-        # -- [B x A]
         policy_logits = self.policy(core_output)
-        # -- [B x A]
         baseline = self.baseline(core_output)
 
         if self.training:
-            action = torch.multinomial(
-                F.softmax(policy_logits, dim=1), num_samples=1)
+            action = torch.multinomial(F.softmax(policy_logits, dim=1), num_samples=1)
         else:
             # Don't sample when testing.
             action = torch.argmax(policy_logits, dim=1)

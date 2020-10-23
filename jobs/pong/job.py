@@ -10,10 +10,10 @@ import time
 import itertools as it
 import os
 from time import sleep
-from .net import NetHackNet as Net
-from .env import create_env, ResettingEnvironment
+from .net import AtariNet as Net
 from .vtrace import from_logits, from_importance_weights
-
+from .atari_wrappers import wrap_pytorch, wrap_deepmind, wrap_atari
+from .environment import Environment
 import tracemalloc
 
 
@@ -69,27 +69,22 @@ def _create_buffers(unroll_length, observation_space, num_actions, initial_state
     buffers = {key: None for key in specs}
     for key in buffers:
         buffers[key] = torch.empty(**specs[key])
-    state = initial_state 
+    state = initial_state
     buffers["initial_agent_state"] = state
 
     return buffers
 
-def print_trace(snap, top):
-    top_stats = snap.statistics('lineno')
 
-    print(f"[ Top {top} ]")
-    for stat in top_stats[:top]:
-            print(stat)
+def create_env(env):
+    return wrap_pytorch(
+        wrap_deepmind(
+            make_atari(env),
+            clip_rewards=False,
+            frame_stack=True,
+            scale=False,
+        )
+    )
 
-def collect_stats(snapshots):
-    snapshots.append(tracemalloc.take_snapshot())        
-    if len(snapshots) > 3: 
-        stats = snapshots[-1].compare_to(snapshots[-2], 'filename')    
-        for stat in stats[:10]:                
-            print("{} new KiB {} total KiB {} new {} total memory blocks: ".format(stat.size_diff/1024, stat.size / 1024, stat.count_diff ,stat.count))                
-            for line in stat.traceback.format():                    
-                print(line)
-    return snapshots
 
 def learner(
     init: Tuple[
@@ -108,7 +103,7 @@ def learner(
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
     logger.info("Env: " + str(cfg.env.task))
-    env = create_env(cfg.env.task, savedir=None)
+    env = create_env(cfg.env.task)
     observation_space = env.observation_space
     action_space = env.action_space
     model = Net(observation_space, action_space.n, cfg.model.lstm)
@@ -140,7 +135,7 @@ def learner(
 
     for iteration in it.count():
         with prof(category="rpc-sample"):
-            bsize, buffers = replay_buffer.sample_batch(B, 'actor', 8)
+            bsize, buffers = replay_buffer.sample_batch(B, "actor", 8)
             if bsize == 0:
                 logger.warning("Batch size is 0!")
                 sleep(1)
@@ -307,18 +302,18 @@ def actor(
     ],
     cfg: DictConfig,
 ):
-    tracemalloc.start(10)
-    snapshots = []
     torch.set_num_threads(4)
     logger = glm.utils.default_logger
     logger.info("Booting an Impala actor")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
     logger.info(f"Saving NLE data in {os.getcwd()}")
-    env = create_env(cfg.env.task, savedir=os.getcwd())
+    gym_env = create_env(cfg.env.task)
+    seed = world.rank ^ int.from_bytes(os.urandom(4), byteorder="little")
+    gym_env.seed(seed)
+    env = Environment(gym_env)
     observation_space = env.observation_space
     action_space = env.action_space
-    env = ResettingEnvironment(env)
     model = Net(observation_space, action_space.n, cfg.model.lstm)
     env_output = env.initial()
     agent_state = model.initial_state(batch_size=1)
@@ -335,7 +330,10 @@ def actor(
             with prof(category="recreating_buffers"):
                 del buffers
                 buffers = _create_buffers(
-                    cfg.training.unroll_length, observation_space, action_space.n, agent_state
+                    cfg.training.unroll_length,
+                    observation_space,
+                    action_space.n,
+                    agent_state,
                 )
         # Write old rollout end.
         with prof(category="buffer"):
@@ -384,8 +382,7 @@ def init(cfg: DictConfig):
     world = glm.distributed.create_world_with_env()
     impala_group = world.create_rpc_group("impala", world.get_members())
     replay_buffer = glm.buffers.DistributedBuffer(
-        buffer_name="buffer", group=impala_group,
-        buffer_size=20
+        buffer_name="buffer", group=impala_group, buffer_size=20
     )
     server = glm.servers.model_server_helper(model_num=1)[0]
     # Counters and Switch
