@@ -1,7 +1,7 @@
 training:
   unroll_length: 80
-  batch_size: 8
-  total_steps: 1000000000
+  batch_size: 128
+  total_steps: 900000000
   entropy_cost: 0.0006
   baseline_cost: 0.5
   discounting: 0.99
@@ -10,15 +10,19 @@ training:
   momentum: 0.0
   epsilon: 0.01
   grad_norm_clipping: 40.0
-  total_parameter_updates: 10
+env:
+  task: 'NetHackStaircase-v0'
+model:
+  lstm: true
 run:
   force_rank_0: learner
   tasks:
     learner:
       requirements:
-        cpus: 4
+        cpus: 8
+        gpus: 1
       processes: 1
     actor:
       requirements:
         cpus: 4
-      processes: 1 
+      processes: 46 

@@ -47,7 +47,7 @@ def compute_policy_gradient_loss(logits, actions, advantages):
     return torch.sum(cross_entropy * advantages.detach())
 
 
-def _create_buffers(unroll_length, observation_space, num_actions, model):
+def _create_buffers(unroll_length, observation_space, num_actions, initial_state):
     # Get specimens to infer shapes and dtypes.
     size = (unroll_length + 1,)
     samples = {k: torch.from_numpy(v) for k, v in observation_space.sample().items()}
@@ -69,7 +69,7 @@ def _create_buffers(unroll_length, observation_space, num_actions, model):
     buffers = {key: None for key in specs}
     for key in buffers:
         buffers[key] = torch.empty(**specs[key])
-    state = model.initial_state(batch_size=1)
+    state = initial_state 
     buffers["initial_agent_state"] = state
 
     return buffers
@@ -107,10 +107,11 @@ def learner(
     logger.info("Booting an Impala learner")
     world, impala_group, replay_buffer, server = init
     logger.info("My friends: " + str(world.get_members()))
+    logger.info("Env: " + str(cfg.env.task))
     env = create_env(cfg.env.task, savedir=None)
     observation_space = env.observation_space
     action_space = env.action_space
-    model = Net(observation_space, action_space.n, True)
+    model = Net(observation_space, action_space.n, cfg.model.lstm)
     del env
     optimizer = torch.optim.RMSprop(
         model.parameters(),
@@ -318,25 +319,32 @@ def actor(
     observation_space = env.observation_space
     action_space = env.action_space
     env = ResettingEnvironment(env)
-    model = Net(observation_space, action_space.n, True)
-    buffers = _create_buffers(
-        cfg.training.unroll_length, observation_space, action_space.n, model
-    )
+    model = Net(observation_space, action_space.n, cfg.model.lstm)
     env_output = env.initial()
     agent_state = model.initial_state(batch_size=1)
     agent_output, unused_state = model(env_output, agent_state)
     impala_group.barrier()
     prof = glm.utils.SimpleProfiler()
     server.pull(model)
+    buffers = _create_buffers(
+        cfg.training.unroll_length, observation_space, action_space.n, agent_state
+    )
     for iteration in it.count():
+        # Reset the buffers to prevent the memory leak
+        if iteration % 10 == 0:
+            with prof(category="recreating_buffers"):
+                del buffers
+                buffers = _create_buffers(
+                    cfg.training.unroll_length, observation_space, action_space.n, agent_state
+                )
         # Write old rollout end.
-        #with prof(category="buffer"):
-        #    for key in env_output:
-        #        buffers[key][0, ...] = env_output[key]
-        #    for key in agent_output:
-        #        buffers[key][0, ...] = agent_output[key]
-        #    for i, tensor in enumerate(agent_state):
-        #        buffers["initial_agent_state"][i][...] = tensor
+        with prof(category="buffer"):
+            for key in env_output:
+                buffers[key][0, ...] = env_output[key]
+            for key in agent_output:
+                buffers[key][0, ...] = agent_output[key]
+            for i, tensor in enumerate(agent_state):
+                buffers["initial_agent_state"][i][...] = tensor
 
         # Do new rollout.
         for t in range(cfg.training.unroll_length):
@@ -347,14 +355,14 @@ def actor(
             with prof(category="env"):
                 env_output = env.step(agent_output["action"])
 
-            #with prof(category="buffer"):
-            #    for key in env_output:
-            #        buffers[key][t + 1, ...] = env_output[key]
-            #    for key in agent_output:
-            #        buffers[key][t + 1, ...] = agent_output[key]
+            with prof(category="buffer"):
+                for key in env_output:
+                    buffers[key][t + 1, ...] = env_output[key]
+                for key in agent_output:
+                    buffers[key][t + 1, ...] = agent_output[key]
 
-    #    with prof(category="replay_buffer"):
-    #        replay_buffer.append(buffers)
+        with prof(category="replay_buffer"):
+            replay_buffer.append(buffers)
         with prof(category="rpc-pulling"):
             impala_group.registered_sync("increment_sample_collected")
             if iteration % 10 == 0:
@@ -367,7 +375,7 @@ def actor(
                 break
 
     logger.info(prof)
-    # Have a barrier at the end to make sure everything is sync before exiting
+    # Have a barrier at the end to make sure everything is synchronized before exiting
     impala_group.barrier()
 
 

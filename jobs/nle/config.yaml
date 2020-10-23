@@ -12,6 +12,8 @@ training:
   grad_norm_clipping: 40.0
 env:
   task: 'NetHackStaircase-v0'
+model:
+  lstm: true
 run:
   force_rank_0: learner
   tasks:

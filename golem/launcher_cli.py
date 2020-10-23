@@ -98,7 +98,6 @@ def main():
             process = subprocess.Popen(cmd, env=current_env)
             processes.append(process)
         with open(run_folder + '/pids', "a") as file_object:
-            # Append 'hello' at the end of file
             file_object.write(str(process.pid) + '\n')
 
     if args.daemon:

@@ -10,14 +10,14 @@ nodes:
     user: 'ubuntu'
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:
-      cpus: 96
+      cpus: 92
   cpu_worker_2:
     # host can also be a ssh host name
     host: '172.31.32.225'
     user: 'ubuntu'
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:
-      cpus: 96
+      cpus: 92
   gpu_worker_1:
     host: '172.31.46.28'
     user: 'ubuntu'
