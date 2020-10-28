@@ -1,11 +1,11 @@
 training:
-  unroll_length: 80
-  batch_size: 256
-  total_steps: 100_000_000
-  entropy_cost: 0.0002
+  unroll_length: 20
+  batch_size: 1024
+  total_steps: 200_000_000
+  entropy_cost: 0.01
   baseline_cost: 0.5
   discounting: 0.99
-  learning_rate: 0.00048
+  learning_rate: 0.0006
   alpha: 0.99
   momentum: 0.0
   epsilon: 0.01
@@ -13,7 +13,7 @@ training:
 env:
   task: 'PongNoFrameskip-v4'
 model:
-  lstm: true
+  lstm: false
 run:
   force_rank_0: learner
   tasks:

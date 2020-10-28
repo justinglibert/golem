@@ -127,7 +127,9 @@ def learner(
     prof = glm.utils.SimpleProfiler()
     with prof(category="sleeping"):
         while replay_buffer.all_size() < B:
-            logger.info(f"The size of the replay buffer ({replay_buffer.all_size()}) is smaller then {B}. Waiting...")
+            logger.info(
+                f"The size of the replay buffer ({replay_buffer.all_size()}) is smaller then {B}. Waiting..."
+            )
             sleep(5)
 
     for iteration in it.count():
@@ -216,7 +218,7 @@ def learner(
                 model.parameters(), cfg.training.grad_norm_clipping
             )
             optimizer.step()
-            #scheduler.step()
+            scheduler.step()
             if iteration % 10 == 0:
                 logger.info(
                     "{:.2f} steps sampled/s".format(
