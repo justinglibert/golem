@@ -7,6 +7,8 @@ Attributes:
 import colorlog
 from logging import INFO
 import time
+import collections
+import torch
 
 
 class FakeLogger(object):
@@ -48,6 +50,33 @@ default_logger.setLevel(INFO)
 default_logger.propagate = False
 fake_logger = FakeLogger()
 
+
+import collections
+
+def flatten(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+class Moving(object):
+    def __init__(self, size):
+        self.d = collections.deque(maxlen=size)
+        self.total = 0
+    def addm(self, vals):
+        for v in vals:
+            self.add(v)
+    def add(self, val):
+        self.d.append(val)
+        self.total += 1
+    def stats(self):
+        m = torch.mean(torch.Tensor(self.d))
+        v = torch.var(torch.Tensor(self.d))
+        return m, v
 
 class SimpleProfiler(object):
     def __init__(self):
