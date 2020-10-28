@@ -264,7 +264,7 @@ class World:
                  name: str,
                  rank: int = -1,
                  world_size: int = None,
-                 init_method: str = "tcp://localhost:9100",
+                 init_method: str = "env://",
                  rpc_timeout: float = 60,
                  rpc_threads: int = 8):
         """
@@ -286,14 +286,20 @@ class World:
 
         # "<rank-number>" is used as the unique name.
         rpc.init_rpc(self.name,
+                     backend=rpc.BackendType.TENSORPIPE,
                      rank=rank,
                      world_size=world_size,
-                     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+                     #rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+                     #    init_method=init_method,
+                     #    num_send_recv_threads=rpc_threads,
+                     #    rpc_timeout=rpc_timeout
+                     #)
+                     rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
                          init_method=init_method,
-                         num_send_recv_threads=rpc_threads,
+                         num_worker_threads=rpc_threads,
                          rpc_timeout=rpc_timeout
                      )
-                     )
+                 )
 
         # get rank-name mapping
         self.rank_name_map = {}

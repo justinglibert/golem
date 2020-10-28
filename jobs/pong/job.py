@@ -252,42 +252,61 @@ def learner(
                     break
                 elif impala_group.registered_sync("get_global_switch") is False:
                     break
+                global_timer = impala_group.registered_sync("get_global_timer")
+                samples_collected = impala_group.registered_sync("get_samples_collected")
+                parameter_updates = impala_group.registered_sync("get_parameter_updates")
+                steps_processed = impala_group.registered_sync("get_step_processed")
+                steps_sampled_s = ( 
+                                samples_collected
+                                / global_timer
+                )
+                param_updates_s = ( 
+                                parameter_updates
+                                / global_timer
+                )
+                steps_processed_s = ( 
+                                steps_processed
+                                / global_timer
+                )
                 logger.info(
                         "{:.2f} steps sampled/s".format(
-                            impala_group.registered_sync("get_samples_collected")
-                            / impala_group.registered_sync("get_global_timer")
+                            steps_sampled_s
                             )
                         )
                 logger.info(
                         "{:.2f} param updates/s".format(
-                            impala_group.registered_sync("get_parameter_updates")
-                            / impala_group.registered_sync("get_global_timer")
+                            param_updates_s
                             )
                         )
                 logger.info(
                         "{:.2f} steps processed/s".format(
-                            impala_group.registered_sync("get_step_processed")
-                            / impala_group.registered_sync("get_global_timer")
+                            steps_processed_s
                             )
                         )
 
                 logger.info(
                         "total steps sampled = {:.2f}".format(
-                            impala_group.registered_sync("get_samples_collected")
+                            samples_collected
                             )
                         )
                 logger.info(
                         "total param updates = {:.2f}".format(
-                            impala_group.registered_sync("get_parameter_updates")
+                            parameter_updates
                             )
                         )
                 logger.info(
                         "total steps processed = {:.2f}".format(
-                            impala_group.registered_sync("get_step_processed")
+                            steps_processed
                             )
                         )
                 logger.info(prof)
+                writer.add_scalar("Speed/StepSampledS", steps_sampled_s)
+                writer.add_scalar("Speed/ParamUpdatesS", param_updates_s)
+                writer.add_scalar("Speed/StepProcessedS", steps_processed_s)
 
+                writer.add_scalar("Progress/StepSampled", samples_collected)
+                writer.add_scalar("Progress/ParamUpdates", parameter_updates)
+                writer.add_scalar("Progress/StepProcessed", steps_processed)
         with prof(category="rpc-parameter-server"):
             if iteration % 20 == 0:
                 server.push(model)
