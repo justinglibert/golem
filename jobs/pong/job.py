@@ -100,6 +100,7 @@ def learner(
     torch.set_num_threads(8)
     logger.info("Booting an Impala learner")
     world, impala_group, replay_buffer, server = init
+    is_leader = world.rank == 0
     logger.info("My friends: " + str(world.get_members()))
     logger.info("Env: " + str(cfg.env.task))
     gym_env = create_env(cfg.env.task)
@@ -128,7 +129,7 @@ def learner(
         return 1 - min(epoch * T * B, total_steps) / total_steps
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    impala_group.barrier()
+    impala_group.barrier(is_leader)
     prof = glm.utils.SimpleProfiler()
     with prof(category="sleeping"):
         while replay_buffer.all_size() < B:
@@ -331,7 +332,7 @@ def learner(
         )
     )
     # Have a barrier at the end to make sure everything is sync before exiting
-    impala_group.barrier()
+    impala_group.barrier(is_leader)
 
 
 def actor(
@@ -347,6 +348,7 @@ def actor(
     logger = glm.utils.default_logger
     logger.info("Booting an Impala actor")
     world, impala_group, replay_buffer, server = init
+    is_leader = world.rank == 0
     logger.info("My friends: " + str(world.get_members()))
     gym_env = create_env(cfg.env.task)
     seed = world.rank ^ int.from_bytes(os.urandom(4), byteorder="little")
@@ -359,7 +361,7 @@ def actor(
     env_output = env.initial()
     agent_state = model.initial_state(batch_size=1)
     agent_output, unused_state = model(env_output, agent_state)
-    impala_group.barrier()
+    impala_group.barrier(is_leader)
     prof = glm.utils.SimpleProfiler()
     server.pull(model)
     buffers = _create_buffers(
@@ -419,19 +421,24 @@ def actor(
 
     logger.info(prof)
     # Have a barrier at the end to make sure everything is synchronized before exiting
-    impala_group.barrier()
+    impala_group.barrier(is_leader)
 
 
 def init(cfg: DictConfig):
     logger = glm.utils.default_logger
     world = glm.distributed.create_world_with_env()
-    impala_group = world.create_rpc_group("impala", world.get_members())
+    is_leader = world.rank == 0
+    logger.info("World is setup :)")
+    impala_group = world.create_rpc_group("impala", world.get_members(), lead=is_leader)
+    logger.info("RPC group setup")
     replay_buffer = glm.buffers.DistributedBuffer(
         buffer_name="buffer", group=impala_group, buffer_size=50
     )
-    server = glm.servers.model_server_helper(model_num=1)[0]
+    logger.info("Buffer setup")
+    server = glm.servers.model_server_helper(model_num=1, lead=is_leader)[0]
+    logger.info("Model Server setup")
     # Counters and Switch
-    if world.rank == 0:
+    if is_leader:
         logger.info("I am the rank 0. Creating counters")
 
         sample_counter = glm.widgets.Counter(step=cfg.training.unroll_length * 20)

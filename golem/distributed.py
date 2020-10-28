@@ -286,19 +286,19 @@ class World:
 
         # "<rank-number>" is used as the unique name.
         rpc.init_rpc(self.name,
-                     backend=rpc.BackendType.TENSORPIPE,
+                     #backend=rpc.BackendType.TENSORPIPE,
                      rank=rank,
                      world_size=world_size,
-                     #rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-                     #    init_method=init_method,
-                     #    num_send_recv_threads=rpc_threads,
-                     #    rpc_timeout=rpc_timeout
-                     #)
-                     rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+                     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
                          init_method=init_method,
-                         num_worker_threads=rpc_threads,
+                         num_send_recv_threads=rpc_threads,
                          rpc_timeout=rpc_timeout
                      )
+                     #rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+                     #    init_method=init_method,
+                     #    num_worker_threads=rpc_threads,
+                     #    rpc_timeout=rpc_timeout
+                     #)
                  )
 
         # get rank-name mapping
@@ -347,7 +347,7 @@ class World:
                                 ranks.index(self.rank))
         return group
 
-    def create_rpc_group(self, group_name: str, members: List[str]):
+    def create_rpc_group(self, group_name: str, members: List[str], lead: bool):
         """
         Create a sub process group for rpc calls. This function
         is blocking and requires that all processes in ``members`` to
@@ -360,6 +360,7 @@ class World:
         Returns:
             A rpc group.
         """
+        logger.info("CREATING RPC GROUP")
         if get_cur_name() not in members:  # pragma: no cover
             raise RuntimeError("Creator Process [{}] not in Group [{}]"
                                .format(get_cur_name(), group_name))
@@ -373,7 +374,8 @@ class World:
         # temporarily set a signal
         self.group_create_signals[group_name] = False
         # wait for other members to enter
-        if get_cur_name() == members[0]:
+        if lead:
+            logger.info("RANK 0")
             while True:
                 sleep(0.1)
                 future = [
@@ -381,20 +383,26 @@ class World:
                     for m in members
                 ]
                 for fut in future:
+                    logger.info("WAIT")
                     if not fut.wait():
                         break
                 else:
+                    logger.info("ELSE")
                     future = [
                         rpc.rpc_async(m, _unlock_group, args=(group_name,))
                         for m in members
                     ]
                     for fut in future:
                         fut.wait()
+                        logger.info("UNLOCKED")
                     # finish syncing all processes
+                    logger.info("BREAKING")
                     break
         else:
+            logger.info("SLEEPING")
             while self.group_create_signals[group_name] is not True:
                 sleep(0.1)
+        logger.info("DONE")
         return group
 
     def get_members(self):
@@ -410,12 +418,14 @@ class World:
 
 def create_world_with_env(**kwargs) -> World:
     logger.info("Waiting for all the Golem Processes to join...")
-    return World(
+    w = World(
         name=os.environ["GOLEM_NAME"],
         rank=int(os.environ["RANK"]),
         world_size=int(os.environ["WORLD_SIZE"]),
         init_method="env://",
         **kwargs)
+    logger.info("World setup!")
+    return w
 
 
 class CollectiveGroup:
@@ -838,7 +848,7 @@ class RpcGroup:
         return self._rpc_service_call(rpc.remote, key, args, kwargs)
 
     @_check_executor
-    def barrier(self):
+    def barrier(self, lead):
         """
         Synchronize all members in the group, until all members have entered
         a ``barrier()`` function.
@@ -847,13 +857,14 @@ class RpcGroup:
         """
 
         self._barrier_status = True
-        if get_cur_name() == self.group_members[0]:
+        if lead:
             while True:
                 all_entered = all(
                     self.registered_sync("_rpc_entered_barrier_{}".format(m))
                     for m in self.group_members
                 )
                 if not all_entered:
+                    logger.info("SLEEPING BARRIER")
                     sleep(0.2)
                 else:
                     break

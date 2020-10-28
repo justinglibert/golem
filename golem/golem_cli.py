@@ -30,6 +30,9 @@ def parse_args():
     parser.add_argument("--experiment_id", default=default_experiment_id, type=str,
                         help="Experiment ID"
                         )
+    parser.add_argument("--force_sync_glm", default=False, action='store_true',
+                        help="Experiment ID"
+                        )
     parser.add_argument("network_config", type=str,
                         help="Network config (path to yaml file with the nodes)"
                         )
@@ -95,6 +98,15 @@ def upload_job_folder_to_node(c, job, python_binary):
         c, job_folder_path, golem_path + '/jobs/', exclude='__pycache__')
 
 
+def upload_golem_to_node(c, python_binary):
+    glm_path = os.path.abspath(
+        os.path.join(glm.__path__[0], '..', 'golem'))
+    golem_path = c.run(
+        '{} -c "import golem as glm;import os; print(os.path.abspath(os.path.join(glm.__path__[0], \'..\')))"'.format(python_binary), hide=True).stdout.strip()
+    print('Uploading golem to node...')
+    patchwork.transfers.rsync(
+        c, glm_path, golem_path + '/', exclude='__pycache__')
+    
 def find_rank_0_task(tasks):
     for t in tasks:
         if t['start_rank'] == 0:
@@ -153,6 +165,8 @@ def main():
                     # We don't run rank 0 yet
                     continue
                 python_binary = network_config['nodes'][node]['python_binary']
+                if args.force_sync_glm:
+                    upload_golem_to_node(c, python_binary)
                 upload_job_folder_to_node(c, job, python_binary)
                 run_glm_launcher(
                     c, experiment_id, job, job_config_name, t, current_worldsize, master_node_ip, master_node_port, python_binary)
@@ -165,12 +179,17 @@ def main():
             # 3) Tail the logs of rank=0 on the master machine
             python_binary = network_config['nodes'][master_node]['python_binary']
             print(f'Running Golem Launcer on {master_node}, the master node')
+            if args.force_sync_glm:
+                upload_golem_to_node(c, python_binary)
             upload_job_folder_to_node(c, job, python_binary)
             run_glm_launcher(c_master, experiment_id, job, job_config_name, rank_0_task, current_worldsize,
                              master_node_ip, master_node_port, python_binary, daemon=False)
         except KeyboardInterrupt:
             print('KeyboardInterrupt!')
             for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
+                if len(placement[node]['tasks']) == 0:
+                    print('Skipping node', node)
+                    continue
                 c = Connection(**host)
                 print('Cleaning zombie processes on node', node)
                 python_binary = network_config['nodes'][node]['python_binary']
@@ -183,6 +202,9 @@ def main():
         print("Error!", e)
         print("Cleaning...")
         for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
+            if len(placement[node]['tasks']) == 0:
+                print('Skipping node', node)
+                continue
             c = Connection(**host)
             print('Cleaning zombie processes on node', node)
             python_binary = network_config['nodes'][node]['python_binary']

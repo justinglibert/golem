@@ -1,6 +1,6 @@
 training:
   unroll_length: 20
-  batch_size: 32
+  batch_size: 64
   total_steps: 200_000_000
   entropy_cost: 0.01
   baseline_cost: 0.5

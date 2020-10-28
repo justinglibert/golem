@@ -272,7 +272,7 @@ class PushPullModelServerImpl:
                         PushPullModelServer(self.model_name, self.o_server))
 
 
-def model_server_helper(model_num):
+def model_server_helper(model_num, lead):
     """
     Helper function for creating a tuple of model servers,
     used by APEX, etc. This function requires all processes
@@ -290,16 +290,16 @@ def model_server_helper(model_num):
     # create groups first
     world = get_world()
     server_group = world.create_rpc_group(DEFAULT_GROUP_NAME,
-                                          world.get_members())
+                                          world.get_members(), lead)
 
     # create servers
     # In current implementation, only one process will initialize the server
-    if get_cur_name() == world.get_members()[0]:
+    if lead:
         for i in range(model_num):
             _server = PushPullModelServerImpl("model_server_" + str(i),
                                               server_group)
 
-    server_group.barrier()
+    server_group.barrier(lead)
 
     servers = tuple(
         server_group.get_paired("model_server_" + str(i)).to_here()
