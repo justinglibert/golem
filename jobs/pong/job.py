@@ -160,6 +160,7 @@ def learner(
 
         with prof(category="backward_pass"):
             # Take final value function slice for bootstrapping.
+            # This is suspicious
             bootstrap_value = learner_outputs["baseline"][-1]
 
             # Move from obs[t] -> action[t] to action[t] -> obs[t].
@@ -357,17 +358,18 @@ def actor(
                 for key in agent_output:
                     buffers[key][t + 1, ...] = agent_output[key]
 
-        with prof(category="replay_buffer"):
+        with prof(category="replay-buffer"):
             replay_buffer.append(buffers)
-        with prof(category="rpc-pulling"):
+        with prof(category="rpc-increment"):
             impala_group.registered_sync("increment_sample_collected")
+        with prof(category="rpc-pulling"):
             if iteration % 20 == 0:
                 logger.info("Pulling model....")
                 logger.info(prof)
                 server.pull(model)
                 logger.info("Done!")
 
-        with prof(category="rpc"):
+        with prof(category="rpc-switch"):
             if impala_group.registered_sync("get_global_switch") is False:
                 break
 
