@@ -1,0 +1,27 @@
+training:
+  unroll_length: 80
+  batch_size: 8
+  total_steps: 100_000_000
+  entropy_cost: 0.0006
+  baseline_cost: 0.5
+  discounting: 0.99
+  learning_rate: 0.00048
+  alpha: 0.99
+  momentum: 0.0
+  epsilon: 0.01
+  grad_norm_clipping: 40.0
+env:
+  task: 'PongNoFrameskip-v4'
+model:
+  lstm: false
+run:
+  force_rank_0: learner
+  tasks:
+    learner:
+      requirements:
+        cpus: 4
+      processes: 1
+    actor:
+      requirements:
+        cpus: 4
+      processes: 1 

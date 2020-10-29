@@ -4,9 +4,10 @@ import torch as t
 import random
 from copy import deepcopy
 import torch
-from threading import RLock
+from threading import RLock, Lock
 import numpy as np
 from .distributed import RpcGroup
+from .utils import default_logger as logger
 
 
 class TransitionStorage(list):
@@ -66,6 +67,30 @@ class TransitionStorage(list):
 
 def _round_up(num):
     return int(np.ceil(num))
+
+
+class CentralizedBuffer(object):
+    def __init__(self, buffer_size: int, group: RpcGroup):
+        self.b = TransitionStorage(buffer_size)
+        #self.wr_lock = RLock()
+        self.wr_lock = Lock()
+        self.group = group
+        self.group.register('add_to_buffer', self.store)
+
+    def store(self, trajectory):
+        with self.wr_lock:
+            self.b.store(trajectory)
+
+    def size(self):
+        return len(self.b)
+
+    def sample(self, batch_size, sample_method):
+        with self.wr_lock:
+            local_batch_size, local_batch = sample_method(self.b,
+                                                          batch_size)
+
+        return local_batch_size, local_batch
+
 
 
 class DistributedBuffer(object):

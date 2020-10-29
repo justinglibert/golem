@@ -7,7 +7,8 @@ for p in pids.split('\n'):
         continue
     pid = int(p)
     try:
-        os.kill(pid, 2)
+        # 9 is a force kill, 2 is a keyboard interrupt
+        os.kill(pid, 9)
     except Exception as e:
         print(e)
         continue
