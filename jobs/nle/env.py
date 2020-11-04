@@ -40,7 +40,7 @@ class ResettingEnvironment:
         )
         return result
 
-    def step(self, action):
+    def step(self, action, force_seed=False):
         observation, reward, done, unused_info = self.gym_env.step(
             action.item())
         self.episode_step += 1
@@ -48,6 +48,8 @@ class ResettingEnvironment:
         episode_step = self.episode_step
         episode_return = self.episode_return
         if done:
+            if force_seed is not False:
+                self.gym_env.seed(core=force_seed, disp=force_seed)
             observation = self.gym_env.reset()
             self.episode_return = torch.zeros(1, 1)
             self.episode_step = torch.zeros(1, 1, dtype=torch.int32)

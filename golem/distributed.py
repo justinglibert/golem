@@ -375,7 +375,6 @@ class World:
         self.group_create_signals[group_name] = False
         # wait for other members to enter
         if lead:
-            logger.info("RANK 0")
             while True:
                 sleep(0.1)
                 future = [
@@ -383,26 +382,20 @@ class World:
                     for m in members
                 ]
                 for fut in future:
-                    logger.info("WAIT")
                     if not fut.wait():
                         break
                 else:
-                    logger.info("ELSE")
                     future = [
                         rpc.rpc_async(m, _unlock_group, args=(group_name,))
                         for m in members
                     ]
                     for fut in future:
                         fut.wait()
-                        logger.info("UNLOCKED")
                     # finish syncing all processes
-                    logger.info("BREAKING")
                     break
         else:
-            logger.info("SLEEPING")
             while self.group_create_signals[group_name] is not True:
                 sleep(0.1)
-        logger.info("DONE")
         return group
 
     def get_members(self):

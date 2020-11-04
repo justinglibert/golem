@@ -1,17 +1,17 @@
 training:
-  unroll_length: 80
-  batch_size: 128
-  total_steps: 900000000
-  entropy_cost: 0.0006
+  unroll_length: 40
+  batch_size: 32
+  total_steps: 1_000_000_000
+  entropy_cost: 0.001
   baseline_cost: 0.5
-  discounting: 0.99
-  learning_rate: 0.00048
+  discounting: 0.999
+  learning_rate: 0.0002
   alpha: 0.99
   momentum: 0.0
-  epsilon: 0.01
+  epsilon: 0.000001
   grad_norm_clipping: 40.0
 env:
-  task: 'NetHackStaircase-v0'
+  task: 'NetHackScore-v0'
 model:
   lstm: true
 run:
@@ -25,4 +25,4 @@ run:
     actor:
       requirements:
         cpus: 4
-      processes: 46 
+      processes: 36 

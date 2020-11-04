@@ -97,7 +97,7 @@ class NetHackNet(nn.Module):
         self.W = self.glyph_shape[1]
 
         self.k_dim = embedding_dim
-        self.h_dim = 512
+        self.h_dim = 128
 
         self.crop_dim = crop_dim
 

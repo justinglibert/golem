@@ -69,6 +69,7 @@ def main():
         current_env["GOLEM_ENTRY_POINT"] = args.entry_point
         current_env["GOLEM_NAME"] = '{}:{}'.format(
             args.entry_point, dist_rank)
+        current_env["JOB_NAME"] = args.job_name
 
         # spawn the processes
         cmd = []

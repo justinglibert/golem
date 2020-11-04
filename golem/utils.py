@@ -73,9 +73,12 @@ class Moving(object):
     def add(self, val):
         self.d.append(val)
         self.total += 1
-    def stats(self):
+    def stats(self, add_abs=False):
         m = torch.mean(torch.Tensor(self.d))
         v = torch.var(torch.Tensor(self.d))
+        if add_abs:
+            a = torch.clamp(torch.sign(torch.Tensor(self.d)), 0, 1)
+            return m, v, torch.mean(a)
         return m, v
 
 class SimpleProfiler(object):
