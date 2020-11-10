@@ -34,6 +34,8 @@ def parse_args():
     parser.add_argument("--daemon", action="store_true",
                         help="Daemon mode")
 
+    parser.add_argument("--restore", action="store_true",
+                        help="Restore mode")
     # positional
     parser.add_argument("job_name", type=str,
                         help="Job name"
@@ -64,12 +66,19 @@ def main():
     for local_rank in range(0, args.nproc):
         # each process's rank
         dist_rank = args.current_rank + local_rank
+        home = os.path.expanduser("~")
+        run_folder = home + '/golem/' + args.job_name + '/' + args.experiment_id
+
         current_env["RANK"] = str(dist_rank)
         current_env["LOCAL_RANK"] = str(local_rank)
         current_env["GOLEM_ENTRY_POINT"] = args.entry_point
         current_env["GOLEM_NAME"] = '{}:{}'.format(
             args.entry_point, dist_rank)
         current_env["JOB_NAME"] = args.job_name
+        current_env["GOLEM_EXPERIMENT_ID"] = args.experiment_id
+        current_env["GOLEM_RUN_FOLDER"] = run_folder
+        if args.restore:
+            current_env['GOLEM_RESTORE'] = str(1)
 
         # spawn the processes
         cmd = []
@@ -77,9 +86,6 @@ def main():
         cmd.append("-m")
 
         cmd.append('jobs.' + args.job_name + '.job')
-        home = os.path.expanduser("~")
-
-        run_folder = home + '/golem/' + args.job_name + '/' + args.experiment_id
         os.makedirs(run_folder, exist_ok=True)
 
         cmd.extend(['hydra.run.dir=' + run_folder,

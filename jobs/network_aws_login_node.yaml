@@ -1,19 +1,19 @@
 master_node:
   # Private ip address of the node
   ip: '172.31.46.28'
-  port: '121214'
+  port: '6666'
   name: gpu_worker_1
 nodes:
   cpu_worker_1:
     # host can also be a ssh host name
-    host: '172.31.40.206'
+    host: '172.31.38.108'
     user: 'ubuntu'
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:
       cpus: 92
   cpu_worker_2:
     # host can also be a ssh host name
-    host: '172.31.32.225'
+    host: '172.31.33.205'
     user: 'ubuntu'
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:
@@ -32,8 +32,22 @@ nodes:
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:
       cpus: 92
+  cpu_worker_5:
+    # host can also be a ssh host name
+    host: '172.31.38.148'
+    user: 'ubuntu'
+    python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
+    hardware:
+      cpus: 92
   gpu_worker_1:
     host: '172.31.46.28'
+    user: 'ubuntu'
+    python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
+    hardware:
+      cpus: 8
+      gpus: 1
+  gpu_worker_2:
+    host: '172.31.32.166'
     user: 'ubuntu'
     python_binary: '/home/ubuntu/anaconda3/envs/thesis/bin/python'
     hardware:

@@ -21,7 +21,9 @@ class Counter:
         Get the internal number of counter.
         """
         return self._count
-
+    def set(self, count):
+        self._count = count
+        return
     def reset(self):
         """
         Reset the counter.

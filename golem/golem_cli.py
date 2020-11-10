@@ -31,7 +31,13 @@ def parse_args():
                         help="Experiment ID"
                         )
     parser.add_argument("--force_sync_glm", default=False, action='store_true',
-                        help="Experiment ID"
+                        help="Force sync glm repo to all nodes"
+                        )
+    parser.add_argument("--restore", default=False, action='store_true',
+                        help="Restore from the experiment_id"
+                        )
+    parser.add_argument("--disable_auto_revive", default=False, action='store_true',
+                        help="Disable the autorevive feature of Golem"
                         )
     parser.add_argument("network_config", type=str,
                         help="Network config (path to yaml file with the nodes)"
@@ -53,7 +59,7 @@ def fit_job_on_nodes(current_rank, current_worldsize, placement, task, config, f
     for k, node in placement.items():
         rcpus = node['remaining_cpus']
         rgpus = node['remaining_gpus']
-        if force_node is not None and force_node != k:
+        if force_node is not None and force_node != k and remaining_process_to_fit == config['processes']:
             continue
         if node['remaining_cpus'] >= required_cpus and node['remaining_gpus'] >= required_gpus:
             # Compute how many processes we can fit
@@ -75,7 +81,7 @@ def fit_job_on_nodes(current_rank, current_worldsize, placement, task, config, f
     return current_rank, current_worldsize, placement
 
 
-def run_glm_launcher(c, experiment_id, job, config, tasks, world_size, master_ip, master_port, python_binary, daemon=True):
+def run_glm_launcher(c, experiment_id, job, config, tasks, world_size, master_ip, master_port, python_binary, daemon=True, restore=False):
     processes = tasks['processes']
     start_rank = tasks['start_rank']
     task = tasks['task']
@@ -83,7 +89,7 @@ def run_glm_launcher(c, experiment_id, job, config, tasks, world_size, master_ip
     golem_path = c.run(
         '{} -c "import golem as glm;import os; print(os.path.abspath(os.path.join(glm.__path__[0], \'..\')))"'.format(python_binary), hide=True).stdout.strip()
     command = f'cd {golem_path} && {python_binary} -m golem.launcher_cli' + (DAEMON_FLAG if daemon else '') + f' --experiment_id {experiment_id} --master_addr {master_ip}' \
-        + f' --master_port {master_port} --nproc {processes} --current_rank {start_rank} --world_size {world_size} {job} {config} {task}'
+        + f' --master_port {master_port} --nproc {processes} --current_rank {start_rank} --world_size {world_size}' + (' --restore' if restore else '') + f' {job} {config} {task}'
     print("Running:", command)
     c.run(command)
 
@@ -114,10 +120,85 @@ def find_rank_0_task(tasks):
     raise Exception(f'Could not find rank 0 in {tasks}')
 
 
+def main_run(args, network_config, placement, experiment_id, job, job_config_name, world_size, master_node_ip, master_node_port, master_node, restore, upload=True):
+    try:
+        for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
+            c = Connection(**host)
+            print('Running Golem Launcher on node', node)
+            for t in placement[node]['tasks']:
+                if t['start_rank'] == 0:
+                    print('Skipping.. It is rank 0!')
+                    # We don't run rank 0 yet
+                    continue
+                python_binary = network_config['nodes'][node]['python_binary']
+                if args.force_sync_glm and upload:
+                    upload_golem_to_node(c, python_binary)
+                if upload:
+                    upload_job_folder_to_node(c, job, python_binary)
+                run_glm_launcher(
+                    c, experiment_id, job, job_config_name, t, world_size, master_node_ip, master_node_port, python_binary, restore=restore)
+                print("Done!")
+        master_node_config = network_config['nodes'][master_node]
+        c_master = Connection(
+            host=master_node_config['host'], user=master_node_config['user'])
+        rank_0_task = find_rank_0_task(placement[master_node]['tasks'])
+        try:
+            # 3) Tail the logs of rank=0 on the master machine
+            python_binary = network_config['nodes'][master_node]['python_binary']
+            print(f'Running Golem Launcer on {master_node}, the master node')
+            if args.force_sync_glm and upload:
+                upload_golem_to_node(c, python_binary)
+            if upload:
+                upload_job_folder_to_node(c, job, python_binary)
+            run_glm_launcher(c_master, experiment_id, job, job_config_name, rank_0_task, world_size,
+                             master_node_ip, master_node_port, python_binary, daemon=False, restore=restore)
+        except KeyboardInterrupt:
+            print('KeyboardInterrupt!')
+            for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
+                if len(placement[node]['tasks']) == 0:
+                    print('Skipping node', node)
+                    continue
+                c = Connection(**host)
+                print('Cleaning zombie processes on node', node)
+                python_binary = network_config['nodes'][node]['python_binary']
+                pid_loc = f'~/golem/{job}/{experiment_id}/pids'
+                c.run(
+                    "{} -m golem.kill_pids {}".format(python_binary, pid_loc))
+
+            sys.exit(0)
+    except Exception as e:
+        print("Error!", e)
+        print("Cleaning...")
+        for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
+            if len(placement[node]['tasks']) == 0:
+                print('Skipping node', node)
+                continue
+            c = Connection(**host)
+            print('Cleaning zombie processes on node', node)
+            python_binary = network_config['nodes'][node]['python_binary']
+            pid_loc = f'~/golem/{job}/{experiment_id}/pids'
+            c.run(
+                "{} -m golem.kill_pids {}".format(python_binary, pid_loc))
+        if not args.disable_auto_revive:
+            print("Reviving in 5 seconds...")
+            try:
+                time.sleep(5)
+            except KeyboardInterrupt:
+                print("Revive aborted. Exiting.")
+                sys.exit(0)
+            main_run(args, network_config, placement, experiment_id, job, job_config_name, world_size, master_node_ip, master_node_port, master_node, restore=True, upload=False)
+        else:
+            sys.exit(0)
+
 def main():
     args = parse_args()
     print("===GOLEM CLI===")
     experiment_id = args.experiment_id
+    print(f"Experiment ID: {experiment_id}")
+    restore = False
+    if args.restore:
+        print("Restoring!")
+        restore = True
     job = args.job_name
     job_config_name = args.job_config
     full_network_config_path = os.path.join(os.getcwd(), args.network_config)
@@ -156,63 +237,10 @@ def main():
     print('--Placement--')
     print(yaml.dump(placement, allow_unicode=True, default_flow_style=False))
     # 2) Start all those jobs
-    try:
-        for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
-            c = Connection(**host)
-            print('Running Golem Launcher on node', node)
-            for t in placement[node]['tasks']:
-                if t['start_rank'] == 0:
-                    # We don't run rank 0 yet
-                    continue
-                python_binary = network_config['nodes'][node]['python_binary']
-                if args.force_sync_glm:
-                    upload_golem_to_node(c, python_binary)
-                upload_job_folder_to_node(c, job, python_binary)
-                run_glm_launcher(
-                    c, experiment_id, job, job_config_name, t, current_worldsize, master_node_ip, master_node_port, python_binary)
-                print("Done!")
-        master_node_config = network_config['nodes'][master_node]
-        c_master = Connection(
-            host=master_node_config['host'], user=master_node_config['user'])
-        rank_0_task = find_rank_0_task(placement[master_node]['tasks'])
-        try:
-            # 3) Tail the logs of rank=0 on the master machine
-            python_binary = network_config['nodes'][master_node]['python_binary']
-            print(f'Running Golem Launcer on {master_node}, the master node')
-            if args.force_sync_glm:
-                upload_golem_to_node(c, python_binary)
-            upload_job_folder_to_node(c, job, python_binary)
-            run_glm_launcher(c_master, experiment_id, job, job_config_name, rank_0_task, current_worldsize,
-                             master_node_ip, master_node_port, python_binary, daemon=False)
-        except KeyboardInterrupt:
-            print('KeyboardInterrupt!')
-            for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
-                if len(placement[node]['tasks']) == 0:
-                    print('Skipping node', node)
-                    continue
-                c = Connection(**host)
-                print('Cleaning zombie processes on node', node)
-                python_binary = network_config['nodes'][node]['python_binary']
-                pid_loc = f'~/golem/{job}/{experiment_id}/pids'
-                c.run(
-                    "{} -m golem.kill_pids {}".format(python_binary, pid_loc))
-
-            sys.exit(0)
-    except Exception as e:
-        print("Error!", e)
-        print("Cleaning...")
-        for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
-            if len(placement[node]['tasks']) == 0:
-                print('Skipping node', node)
-                continue
-            c = Connection(**host)
-            print('Cleaning zombie processes on node', node)
-            python_binary = network_config['nodes'][node]['python_binary']
-            pid_loc = f'~/golem/{job}/{experiment_id}/pids'
-            c.run(
-                "{} -m golem.kill_pids {}".format(python_binary, pid_loc))
-        raise e
-
+    main_run(args=args, network_config=network_config, placement=placement, experiment_id=experiment_id,
+            job=job, job_config_name=job_config_name, world_size=current_worldsize,
+            master_node_ip=master_node_ip, master_node_port=master_node_port,
+            master_node=master_node, restore=restore)
 
 if __name__ == "__main__":
     main()

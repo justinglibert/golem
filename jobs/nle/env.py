@@ -14,6 +14,60 @@ def _format_observations(observation, keys=("glyphs", "blstats")):
     return observations
 
 
+
+class EvaluatorEnvironment:
+
+    def __init__(self, gym_env):
+        self.gym_env = gym_env
+        self.episode_return = None
+        self.episode_step = None
+
+    def initial(self):
+        initial_reward = 0
+        # This supports only single-tensor actions ATM.
+        initial_last_action = 0
+        self.episode_return = 0
+        self.episode_step = 0
+        initial_done = 0
+
+        result = _format_observations(self.gym_env.reset())
+        result.update(
+            reward=initial_reward,
+            done=initial_done,
+            episode_return=self.episode_return,
+            episode_step=self.episode_step,
+            last_action=initial_last_action,
+        )
+        return result
+
+    def step(self, action, force_seed=False):
+        observation, reward, done, unused_info = self.gym_env.step(
+            action.item())
+        self.episode_step += 1
+        self.episode_return += reward
+        episode_step = self.episode_step
+        episode_return = self.episode_return
+        if done:
+            if force_seed is not False:
+                self.gym_env.seed(core=force_seed, disp=force_seed)
+            observation = self.gym_env.reset()
+            self.episode_return = 0
+            self.episode_step = 0
+
+        result = _format_observations(observation)
+
+        result.update(
+            reward=reward,
+            done=done,
+            episode_return=episode_return,
+            episode_step=episode_step,
+            last_action=action,
+        )
+        return result
+
+    def close(self):
+        self.gym_env.close()
+
 class ResettingEnvironment:
     """Turns a Gym environment into something that can be step()ed indefinitely."""
 

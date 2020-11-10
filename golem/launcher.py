@@ -5,12 +5,13 @@ from omegaconf import DictConfig
 from golem import utils
 import golem as glm
 from distutils.dir_util import copy_tree
+from shutil import copy2
 
 def launch(init, entry_points):
     entry_point = os.environ["GOLEM_ENTRY_POINT"]
     logger = utils.default_logger
-
     def launch_hydra(cfg: DictConfig):
+        # This function fires when Hydra has initialized
         logger.info("Rank: {}. World Size: {}. Golem Name: {}. Golem Entry Point: {}".format(
             os.environ["RANK"], os.environ["WORLD_SIZE"], os.environ["GOLEM_NAME"], os.environ["GOLEM_ENTRY_POINT"]))
         if int(os.environ["LOCAL_RANK"]) == 0:

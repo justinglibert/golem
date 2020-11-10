@@ -1,7 +1,7 @@
 training:
-  unroll_length: 40
+  unroll_length: 80
   batch_size: 32
-  total_steps: 1_000_000_000
+  total_steps: 4_000_000_000
   entropy_cost: 0.001
   baseline_cost: 0.5
   discounting: 0.999
@@ -10,6 +10,10 @@ training:
   momentum: 0.0
   epsilon: 0.000001
   grad_norm_clipping: 40.0
+  num_buffers: 8
+  checkpointing_frequency: 400
+evaluation:
+  num_episodes: 10
 env:
   task: 'NetHackScore-v0'
 model:
@@ -21,8 +25,12 @@ run:
       requirements:
         cpus: 8
         gpus: 1
-      processes: 1
+      processes: 2
     actor:
       requirements:
         cpus: 4
-      processes: 36 
+      processes: 92 
+    evaluator:
+      requirements:
+        cpus: 8
+      processes: 1

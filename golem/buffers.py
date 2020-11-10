@@ -234,11 +234,18 @@ class DistributedBuffer(object):
                      task_name: str,
                      batch_size_force_multiple: int = 1,
                      sample_method: Union[Callable, str] = "random_unique",
+                     max_remote_nodes: int = -1
                      ) -> Any:
         # p_num = self.group.size()
         filtered_group = list(
             filter(lambda p: task_name in p, self.group.get_group_members()))
         p_num = len(filtered_group)
+        if p_num > batch_size:
+            filtered_group = random.sample(filtered_group, batch_size)
+            p_num = len(filtered_group)
+        if max_remote_nodes > 0 and p_num > max_remote_nodes:
+            filtered_group = random.sample(filtered_group, max_remote_nodes)
+            p_num = len(filtered_group)
         local_batch_size = _round_up(batch_size / p_num)
 
         future = [

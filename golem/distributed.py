@@ -360,7 +360,6 @@ class World:
         Returns:
             A rpc group.
         """
-        logger.info("CREATING RPC GROUP")
         if get_cur_name() not in members:  # pragma: no cover
             raise RuntimeError("Creator Process [{}] not in Group [{}]"
                                .format(get_cur_name(), group_name))
@@ -857,7 +856,6 @@ class RpcGroup:
                     for m in self.group_members
                 )
                 if not all_entered:
-                    logger.info("SLEEPING BARRIER")
                     sleep(0.2)
                 else:
                     break

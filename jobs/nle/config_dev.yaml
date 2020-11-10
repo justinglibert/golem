@@ -10,8 +10,12 @@ training:
   momentum: 0.0
   epsilon: 0.01
   grad_norm_clipping: 40.0
+  num_buffers: 8
+  checkpointing_frequency: 20
+evaluation:
+  num_episodes: 10
 env:
-  task: 'NetHackStaircase-v0'
+  task: 'NetHackScore-v0'
 model:
   lstm: false
 run:
@@ -25,3 +29,7 @@ run:
       requirements:
         cpus: 4
       processes: 1 
+    evaluator:
+      requirements:
+        cpus: 8
+      processes: 1
