@@ -297,8 +297,6 @@ def learner(
                 )
                 optimizer.step()
                 scheduler.step()
-                if np.random.random() < 0.01:
-                    raise Exception("YOLO EXC")
         except Exception as e:
             logger.error("Error in learner thread: " + str(e))
             learned_queue.put(-1)
