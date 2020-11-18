@@ -62,12 +62,16 @@ def main():
     processes = []
 
     print("==GOLEM LAUNCHER==")
+    home = os.path.expanduser("~")
+    run_folder = home + '/golem/' + args.job_name + '/' + args.experiment_id
+    os.makedirs(run_folder, exist_ok=True)
+
+    with open(run_folder + '/job', 'a') as file_object:
+        file_object.write(args.job_name)
 
     for local_rank in range(0, args.nproc):
         # each process's rank
         dist_rank = args.current_rank + local_rank
-        home = os.path.expanduser("~")
-        run_folder = home + '/golem/' + args.job_name + '/' + args.experiment_id
 
         current_env["RANK"] = str(dist_rank)
         current_env["LOCAL_RANK"] = str(local_rank)
@@ -86,7 +90,6 @@ def main():
         cmd.append("-m")
 
         cmd.append('jobs.' + args.job_name + '.job')
-        os.makedirs(run_folder, exist_ok=True)
 
         cmd.extend(['hydra.run.dir=' + run_folder,
                     '--config-dir', './jobs/' + args.job_name + '/', '--config-name', args.job_config])

@@ -46,12 +46,12 @@ class GridNet(nn.Module):
         self.baseline = nn.Linear(self.embedding_size, 1)
 
 
-    def initial_state(self, batch_size=1):
+    def initial_state(self, batch_size=1, device=torch.device('cpu')):
         if not self.use_lstm:
             return tuple()
         return tuple(
             torch.zeros(self.core.num_layers, batch_size,
-                        self.core.hidden_size)
+                        self.core.hidden_size, device=device)
             for _ in range(2)
         )
 

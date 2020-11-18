@@ -32,9 +32,6 @@ def parse_args():
     parser.add_argument("job_name", type=str,
                         help="Job name"
                         )
-    parser.add_argument("job_config", type=str,
-                        help="Config name"
-                        )
     parser.add_argument("script", type=str,
                         help="Script name"
                         )
@@ -48,7 +45,6 @@ def main():
     experiment_id = args.experiment_id
     print(f"Experiment ID: {experiment_id}")
     job = args.job_name
-    job_config_name = args.job_config
     home = os.path.expanduser("~")
     run_folder = home + '/golem/' + args.job_name + '/' + args.experiment_id
 
@@ -68,7 +64,7 @@ def main():
     cmd.append('jobs.' + args.job_name + '.job')
 
     cmd.extend(['hydra.run.dir=' + run_folder,
-                '--config-dir', './jobs/' + args.job_name + '/', '--config-name', args.job_config])
+                '--config-dir', run_folder + '/.hydra/', '--config-name', 'config'])
     process = subprocess.Popen(cmd, env=current_env)
     process.wait()
 

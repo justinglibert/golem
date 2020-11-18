@@ -56,19 +56,22 @@ def fit_job_on_nodes(current_rank, current_worldsize, placement, task, config, f
     requirements = config['requirements']
     required_cpus = requirements.get('cpus', 0)
     required_gpus = requirements.get('gpus', 0)
+    required_slow_gpus = requirements.get('slow_gpus', 0)
     for k, node in placement.items():
         rcpus = node['remaining_cpus']
         rgpus = node['remaining_gpus']
+        rslow_gpus = node['remaining_slow_gpus']
         if force_node is not None and force_node != k and remaining_process_to_fit == config['processes']:
             continue
-        if node['remaining_cpus'] >= required_cpus and node['remaining_gpus'] >= required_gpus:
+        if node['remaining_cpus'] >= required_cpus and node['remaining_gpus'] >= required_gpus and node['remaining_slow_gpus'] >= required_slow_gpus:
             # Compute how many processes we can fit
             processes = min(rcpus // required_cpus if required_cpus > 0 else 1e10, rgpus //
-                            required_gpus if required_gpus > 0 else 1e10, remaining_process_to_fit)
+                            required_gpus if required_gpus > 0 else 1e10, rslow_gpus // required_slow_gpus if required_slow_gpus > 0 else 1e10,  remaining_process_to_fit)
             if processes > 0:
                 remaining_process_to_fit -= processes
                 node['remaining_cpus'] -= required_cpus * processes
                 node['remaining_gpus'] -= required_gpus * processes
+                node['remaining_slow_gpus'] -= required_slow_gpus * processes
                 node['tasks'].append({
                     'task': task,
                     'start_rank': current_rank,
@@ -217,6 +220,7 @@ def main():
             'tasks': [],
             'remaining_cpus': config['hardware'].get('cpus', 0),
             'remaining_gpus': config['hardware'].get('gpus', 0),
+            'remaining_slow_gpus': config['hardware'].get('slow_gpus', 0),
             'host': config['host'],
             'user': config['user']
         }

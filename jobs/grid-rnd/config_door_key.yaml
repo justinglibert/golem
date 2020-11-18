@@ -38,5 +38,6 @@ run:
       processes: 92 
     evaluator:
       requirements:
-        cpus: 8
+        slow_gpus: 1
+        cpus: 4
       processes: 1

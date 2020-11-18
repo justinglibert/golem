@@ -625,9 +625,17 @@ def evaluator(
     observation_space = env.observation_space
     action_space = env.action_space
     model = Net(observation_space, action_space.n, cfg.model.embedding_size, cfg.model.lstm)
+    device = (
+        torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    )
+    model = model.to(device)
+    logger.info("Device: " + str(device))
     env = ResettingEnvironment(env)
     env_output = env.initial()
-    agent_state = model.initial_state(batch_size=1)
+    agent_state = model.initial_state(batch_size=1, device=device)
+    env_output = {
+            k: t.to(device=device) for k, t in env_output.items()
+    }
     agent_output, unused_state = model(env_output, agent_state)
     impala_group.barrier(is_leader)
     prof = glm.utils.SimpleProfiler()
@@ -635,6 +643,7 @@ def evaluator(
     best_mean_returns = -math.inf
     for iteration in it.count():
         server.pull(model)
+        model = model.to(device)
         #model.eval()
         returns = []
         steps_of_episodes = []
@@ -642,8 +651,11 @@ def evaluator(
         for t in range(cfg.evaluation.num_episodes):
             while not done:
                 with torch.no_grad():
+                    env_output = {
+                        k: t.to(device=device, non_blocking=True) for k, t in env_output.items()
+                    }
                     agent_output, agent_state = model(env_output, agent_state)
-                env_output = env.step(agent_output["action"])
+                env_output = env.step(agent_output["action"].cpu())
                 done = env_output["done"].item()
             returns.append(env_output["episode_return"].item())
             steps_of_episodes.append(env_output["episode_step"].item())
@@ -667,7 +679,7 @@ def evaluator(
         impala_group.registered_sync("log_evaluator_results", args=(results,))
         if mean_returns > best_mean_returns:
             best_mean_returns = mean_returns
-            impala_group.registered_sync("save_evaluator_model", args=(model.state_dict(), best_mean_returns))
+            impala_group.registered_sync("save_evaluator_model", args=(model.to(torch.device('cpu')).state_dict(), best_mean_returns))
         if impala_group.registered_sync("get_global_switch") is False:
             break
 
@@ -726,7 +738,7 @@ def init(cfg: DictConfig):
 
 def evaluator_script(cfg: DictConfig):
     logger = glm.utils.default_logger
-    torch.set_num_threads(8)
+    torch.set_num_threads(4)
     logger.info("Evaluator Script")
     env = create_env(cfg.env.task)
     observation_space = env.observation_space
@@ -734,9 +746,17 @@ def evaluator_script(cfg: DictConfig):
     model = Net(observation_space, action_space.n, cfg.model.embedding_size, cfg.model.lstm)
     chkpt = torch.load("best_eval.pt")
     model.load_state_dict(chkpt["model"])
+    device = (
+        torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    )
+    model = model.to(device)
+    logger.info("Device: " + str(device))
     env = ResettingEnvironment(env)
     env_output = env.initial()
-    agent_state = model.initial_state(batch_size=1)
+    agent_state = model.initial_state(batch_size=1, device=device)
+    env_output = {
+            k: t.to(device=device) for k, t in env_output.items()
+    }
     agent_output, unused_state = model(env_output, agent_state)
     prof = glm.utils.SimpleProfiler()
     done = env_output["done"]
@@ -748,8 +768,11 @@ def evaluator_script(cfg: DictConfig):
         for t in range(cfg.evaluation.num_episodes):
             while not done:
                 with torch.no_grad():
+                    env_output = {
+                            k: t.to(device=device, non_blocking=True) for k, t in env_output.items()
+                    }
                     agent_output, agent_state = model(env_output, agent_state)
-                env_output = env.step(agent_output["action"])
+                env_output = env.step(agent_output["action"].cpu())
                 done = env_output["done"].item()
             returns.append(env_output["episode_return"].item())
             steps_of_episodes.append(env_output["episode_step"].item())

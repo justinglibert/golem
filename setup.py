@@ -60,6 +60,7 @@ setuptools.setup(
         "GPUtil",
         "Pillow",
         "tensorboardX",
+        "tensorboard",
         "hydra-core",
         "PyYAML",
         "fabric>=2.0.0",

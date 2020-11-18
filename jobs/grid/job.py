@@ -727,16 +727,24 @@ def init(cfg: DictConfig):
 def evaluator_script(cfg: DictConfig):
     logger = glm.utils.default_logger
     torch.set_num_threads(8)
-    logger.info("Evaluator Script")
+    logger.info("GPU Evaluator Script")
     env = create_env(cfg.env.task)
     observation_space = env.observation_space
     action_space = env.action_space
     model = Net(observation_space, action_space.n, cfg.model.embedding_size, cfg.model.lstm)
-    chkpt = torch.load("best_eval.pt")
+    chkpt = torch.load("best.pt")
     model.load_state_dict(chkpt["model"])
+    device = (
+        torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    )
+    model = model.to(device)
+    logger.info("Device: " + str(device))
     env = ResettingEnvironment(env)
     env_output = env.initial()
-    agent_state = model.initial_state(batch_size=1)
+    agent_state = model.initial_state(batch_size=1, device=device)
+    env_output = {
+            k: t.to(device=device) for k, t in env_output.items()
+    }
     agent_output, unused_state = model(env_output, agent_state)
     prof = glm.utils.SimpleProfiler()
     done = env_output["done"]
@@ -748,8 +756,11 @@ def evaluator_script(cfg: DictConfig):
         for t in range(cfg.evaluation.num_episodes):
             while not done:
                 with torch.no_grad():
+                    env_output = {
+                            k: t.to(device=device, non_blocking=True) for k, t in env_output.items()
+                    }
                     agent_output, agent_state = model(env_output, agent_state)
-                env_output = env.step(agent_output["action"])
+                env_output = env.step(agent_output["action"].cpu())
                 done = env_output["done"].item()
             returns.append(env_output["episode_return"].item())
             steps_of_episodes.append(env_output["episode_step"].item())
