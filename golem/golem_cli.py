@@ -123,6 +123,8 @@ def find_rank_0_task(tasks):
 def main_run(args, network_config, placement, experiment_id, job, job_config_name, world_size, master_node_ip, master_node_port, master_node, restore, upload=True):
     try:
         for node, host in zip(network_config['nodes'].keys(), list(map(lambda n: {'host': n['host'], 'user': n['user']}, network_config['nodes'].values()))):
+            if len(placement[node]['tasks']) == 0:
+                continue
             c = Connection(**host)
             print('Running Golem Launcher on node', node)
             for t in placement[node]['tasks']:
@@ -147,9 +149,9 @@ def main_run(args, network_config, placement, experiment_id, job, job_config_nam
             python_binary = network_config['nodes'][master_node]['python_binary']
             print(f'Running Golem Launcer on {master_node}, the master node')
             if args.force_sync_glm and upload:
-                upload_golem_to_node(c, python_binary)
+                upload_golem_to_node(c_master, python_binary)
             if upload:
-                upload_job_folder_to_node(c, job, python_binary)
+                upload_job_folder_to_node(c_master, job, python_binary)
             run_glm_launcher(c_master, experiment_id, job, job_config_name, rank_0_task, world_size,
                              master_node_ip, master_node_port, python_binary, daemon=False, restore=restore)
         except KeyboardInterrupt:
@@ -193,7 +195,7 @@ def main_run(args, network_config, placement, experiment_id, job, job_config_nam
 def main():
     args = parse_args()
     print("===GOLEM CLI===")
-    experiment_id = args.experiment_id
+    experiment_id = args.experiment_id + '-' + args.job_config
     print(f"Experiment ID: {experiment_id}")
     restore = False
     if args.restore:

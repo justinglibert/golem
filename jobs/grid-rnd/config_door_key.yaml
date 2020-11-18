@@ -1,0 +1,42 @@
+training:
+  unroll_length: 100
+  batch_size: 32
+  total_steps: 200_000_000
+  entropy_cost: 0.0001
+  baseline_cost: 0.5
+  discounting: 0.99
+  learning_rate: 0.0001
+  alpha: 0.99
+  momentum: 0.0
+  epsilon: 0.01
+  grad_norm_clipping: 40
+  num_buffers: 16
+  checkpointing_frequency: 40
+evaluation:
+  num_episodes: 20
+env:
+  # task: 'MiniGrid-Empty-5x5-v0'
+  # task: 'MiniGrid-FourRooms-v0'
+  # task: 'MiniGrid-DoorKey-5x5-v0'
+  # task: 'MiniGrid-DoorKey-6x6-v0'
+  # task: 'MiniGrid-DoorKey-8x8-v0'
+  task: 'MiniGrid-DoorKey-16x16-v0'
+model:
+  lstm: true
+  embedding_size: 256
+run:
+  force_rank_0: learner
+  tasks:
+    learner:
+      requirements:
+        cpus: 8
+        gpus: 1
+      processes: 2
+    actor:
+      requirements:
+        cpus: 4
+      processes: 92 
+    evaluator:
+      requirements:
+        cpus: 8
+      processes: 1

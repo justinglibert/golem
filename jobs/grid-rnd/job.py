@@ -1,4 +1,5 @@
 import hydra
+import math
 import numpy as np
 from omegaconf import DictConfig
 from typing import Tuple, List, Any, Dict
@@ -15,8 +16,8 @@ import itertools as it
 import os
 import threading
 from time import sleep
-from .net import NetHackNet as Net
-from .env import create_env, ResettingEnvironment, EvaluatorEnvironment
+from .net import GridNet as Net
+from .env import create_env, ResettingEnvironment
 from .vtrace import from_logits, from_importance_weights
 
 import tracemalloc
@@ -55,13 +56,8 @@ def compute_policy_gradient_loss(logits, actions, advantages):
 def _create_buffers(unroll_length, observation_space, num_actions, initial_state):
     # Get specimens to infer shapes and dtypes.
     size = (unroll_length + 1,)
-    samples = {k: torch.from_numpy(v) for k, v in observation_space.sample().items()}
-
-    specs = {
-        key: dict(size=size + sample.shape, dtype=sample.dtype)
-        for key, sample in samples.items()
-    }
-    specs.update(
+    specs = dict(
+        frame=dict(size=size + observation_space.shape, dtype=torch.float),
         reward=dict(size=size, dtype=torch.float32),
         done=dict(size=size, dtype=torch.bool),
         episode_return=dict(size=size, dtype=torch.float32),
@@ -74,7 +70,7 @@ def _create_buffers(unroll_length, observation_space, num_actions, initial_state
     buffers = {key: None for key in specs}
     for key in buffers:
         buffers[key] = torch.empty(**specs[key])
-    state = initial_state 
+    state = initial_state
     buffers["initial_agent_state"] = state
 
     return buffers
@@ -115,10 +111,10 @@ def learner(
     torch.distributed.init_process_group("gloo", init_method=init_method, world_size=cfg.run.tasks.learner.processes, rank=world.rank)
 
     logger.info("Env: " + str(cfg.env.task))
-    env = create_env(cfg.env.task, savedir=None)
+    env = create_env(cfg.env.task)
     observation_space = env.observation_space
     action_space = env.action_space
-    model = Net(observation_space, action_space.n, cfg.model.lstm)
+    model = Net(observation_space, action_space.n, cfg.model.embedding_size, cfg.model.lstm)
     del env
     optimizer = torch.optim.RMSprop(
         model.parameters(),
@@ -153,6 +149,13 @@ def learner(
             writer.add_scalar("Eval/EvalMeanSteps", results["mean_steps"], global_step=global_step)
             writer.add_scalar("Eval/EvalVarSteps", results["var_steps"], global_step=global_step)
         impala_group.register("log_evaluator_results", log_evaluator_results)
+        def save_evaluator_model(model_state_dict, mean_returns):
+            logger.info("Saving best evaluator model checkpoint...")
+            writer.add_scalar("Eval/BestMeanReturns", mean_returns, global_step=global_step)
+            torch.save(dict(
+                model=model_state_dict,
+                ), 'best_eval.pt')
+        impala_group.register("save_evaluator_model", save_evaluator_model)
     # What iteration are we on?
 
     # Restoring logic
@@ -279,7 +282,7 @@ def learner(
                 mean_ep_returns_moving, var_ep_returns_moving, mean_abs_ep_returns = moving_episode_returns.stats(add_abs=True) 
                 stats = {
                     "real_batch_size": bsize,
-                    "episode_returns": ep_returns,
+                    #"episode_returns": ep_returns,
                     "mean_ep_returns_moving": mean_ep_returns_moving,
                     "mean_abs_ep_return": mean_abs_ep_returns,
                     "var_ep_returns_moving": var_ep_returns_moving,
@@ -346,13 +349,14 @@ def learner(
     )
     learner_thread.start()
     has_reset_timer = False
+    best_mean_ep_return = -math.inf
 
     for iteration in it.count():
         buffer_index = learned_queue.get()
         if buffer_index == -1:
             logger.error("Error in learner thread caught! Aborting...")
             raise Exception("Error in learner thread")
-        bsize, sampled_buffers = replay_buffer.sample_batch(B, 'actor', 8, max_remote_nodes=46)
+        bsize, sampled_buffers = replay_buffer.sample_batch(B, 'actor', 8, max_remote_nodes=32)
         if bsize is not B:
             logger.error(f"Sampled batched size ({bsize}) is higher than B ({B})")
             sampled_buffers = sampled_buffers[B:]
@@ -398,6 +402,19 @@ def learner(
                 writer.add_scalar("Training/MeanAbsEpisodeReturns", mean_abs_ep_return, global_step=global_step)
                 writer.add_scalar("Training/VarEpisodeReturns", var_ep_returns_moving, global_step=global_step)
                 writer.add_scalar("Training/TotalEpisodes", total_ep, global_step=global_step)
+                if mean_ep_returns_moving > best_mean_ep_return:
+                    logger.info("Saving best checkpoint...")
+                    torch.save(dict(
+                        model=model.module.state_dict(),
+                        optimizer=optimizer.state_dict(),
+                        scheduler=scheduler.state_dict(),
+                        steps_processed=steps_processed,
+                        parameter_updates=parameter_updates,
+                        samples_collected=samples_collected,
+                        iteration=current_iteration
+                        ), 'best.pt')
+                    best_mean_ep_return = mean_ep_returns_moving
+                    logger.info("done")
 
             if iteration % 20 == 0:
                 if is_leader:
@@ -499,6 +516,7 @@ def learner(
                         iteration=current_iteration
                         ), 'checkpoint.pt')
                     logger.info("done")
+    logger.info("Left the main loop")
     # Have a barrier at the end to make sure everything is sync before exiting
     impala_group.barrier(is_leader)
 
@@ -518,12 +536,11 @@ def actor(
     world, impala_group, replay_buffer, server = init
     is_leader = world.rank == 0
     logger.info("My friends: " + str(world.get_members()))
-    logger.info(f"Saving NLE data in {os.getcwd()}")
-    env = create_env(cfg.env.task, savedir=os.getcwd())
+    env = create_env(cfg.env.task)
     observation_space = env.observation_space
     action_space = env.action_space
     env = ResettingEnvironment(env)
-    model = Net(observation_space, action_space.n, cfg.model.lstm)
+    model = Net(observation_space, action_space.n, cfg.model.embedding_size, cfg.model.lstm)
     env_output = env.initial()
     agent_state = model.initial_state(batch_size=1)
     agent_output, unused_state = model(env_output, agent_state)
@@ -598,17 +615,16 @@ def evaluator(
     ],
     cfg: DictConfig,
 ):
-    torch.set_num_threads(8)
+    torch.set_num_threads(16)
     logger = glm.utils.default_logger
     logger.info("Booting an Impala evaluator")
     world, impala_group, replay_buffer, server = init
     is_leader = world.rank == 0
     logger.info("My friends: " + str(world.get_members()))
-    logger.info(f"Saving NLE data in {os.getcwd()}")
-    env = create_env(cfg.env.task, savedir=os.getcwd())
+    env = create_env(cfg.env.task)
     observation_space = env.observation_space
     action_space = env.action_space
-    model = Net(observation_space, action_space.n, cfg.model.lstm)
+    model = Net(observation_space, action_space.n, cfg.model.embedding_size, cfg.model.lstm)
     env = ResettingEnvironment(env)
     env_output = env.initial()
     agent_state = model.initial_state(batch_size=1)
@@ -616,9 +632,10 @@ def evaluator(
     impala_group.barrier(is_leader)
     prof = glm.utils.SimpleProfiler()
     done = env_output["done"]
+    best_mean_returns = -math.inf
     for iteration in it.count():
         server.pull(model)
-        model.eval()
+        #model.eval()
         returns = []
         steps_of_episodes = []
         # Do new rollout.
@@ -626,7 +643,7 @@ def evaluator(
             while not done:
                 with torch.no_grad():
                     agent_output, agent_state = model(env_output, agent_state)
-                env_output = env.step(agent_output["action"], force_seed=np.random.randint(0,1000000))
+                env_output = env.step(agent_output["action"])
                 done = env_output["done"].item()
             returns.append(env_output["episode_return"].item())
             steps_of_episodes.append(env_output["episode_step"].item())
@@ -648,6 +665,9 @@ def evaluator(
         logger.info(results)
 
         impala_group.registered_sync("log_evaluator_results", args=(results,))
+        if mean_returns > best_mean_returns:
+            best_mean_returns = mean_returns
+            impala_group.registered_sync("save_evaluator_model", args=(model.state_dict(), best_mean_returns))
         if impala_group.registered_sync("get_global_switch") is False:
             break
 
@@ -704,4 +724,52 @@ def init(cfg: DictConfig):
     return (world, impala_group, replay_buffer, server)
 
 
-hydra.main()(glm.launcher.launch(init, {"actor": actor, "learner": learner, "evaluator": evaluator}))()
+def evaluator_script(cfg: DictConfig):
+    logger = glm.utils.default_logger
+    torch.set_num_threads(8)
+    logger.info("Evaluator Script")
+    env = create_env(cfg.env.task)
+    observation_space = env.observation_space
+    action_space = env.action_space
+    model = Net(observation_space, action_space.n, cfg.model.embedding_size, cfg.model.lstm)
+    chkpt = torch.load("best_eval.pt")
+    model.load_state_dict(chkpt["model"])
+    env = ResettingEnvironment(env)
+    env_output = env.initial()
+    agent_state = model.initial_state(batch_size=1)
+    agent_output, unused_state = model(env_output, agent_state)
+    prof = glm.utils.SimpleProfiler()
+    done = env_output["done"]
+    for iteration in range(10):
+        #model.eval()
+        returns = []
+        steps_of_episodes = []
+        # Do new rollout.
+        for t in range(cfg.evaluation.num_episodes):
+            while not done:
+                with torch.no_grad():
+                    agent_output, agent_state = model(env_output, agent_state)
+                env_output = env.step(agent_output["action"])
+                done = env_output["done"].item()
+            returns.append(env_output["episode_return"].item())
+            steps_of_episodes.append(env_output["episode_step"].item())
+            done = False
+
+        returns = torch.Tensor(returns)
+        steps_of_episodes = torch.Tensor(steps_of_episodes)
+        mean_returns = torch.mean(returns)
+        var_returns = torch.var(returns)
+        mean_steps = torch.mean(steps_of_episodes)
+        var_steps = torch.var(steps_of_episodes)
+        logger.info(dict(returns=returns, steps_of_episodes=steps_of_episodes))
+        results = dict(
+            mean_returns=mean_returns,
+            var_returns=var_returns,
+            mean_steps=mean_steps,
+            var_steps=var_steps
+        )
+        logger.info(results)
+
+
+
+hydra.main()(glm.launcher.launch(init, {"actor": actor, "learner": learner, "evaluator": evaluator}, {"evaluate": evaluator_script}))()
