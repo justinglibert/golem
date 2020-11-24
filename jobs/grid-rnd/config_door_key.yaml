@@ -12,15 +12,17 @@ training:
   grad_norm_clipping: 40
   num_buffers: 16
   checkpointing_frequency: 40
+  rnd_loss_coef: 0.01
+  intrinsic_reward_coef: 0.001
 evaluation:
   num_episodes: 20
 env:
   # task: 'MiniGrid-Empty-5x5-v0'
   # task: 'MiniGrid-FourRooms-v0'
-  # task: 'MiniGrid-DoorKey-5x5-v0'
+  task: 'MiniGrid-DoorKey-5x5-v0'
   # task: 'MiniGrid-DoorKey-6x6-v0'
   # task: 'MiniGrid-DoorKey-8x8-v0'
-  task: 'MiniGrid-DoorKey-16x16-v0'
+  # task: 'MiniGrid-DoorKey-16x16-v0'
 model:
   lstm: true
   embedding_size: 256

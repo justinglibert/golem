@@ -14,6 +14,14 @@ import traceback
 # Necessary for multithreading.
 os.environ["OMP_NUM_THREADS"] = "1"
 
+def init(module, weight_init, bias_init, gain=1):
+    weight_init(module.weight.data, gain=gain)
+    bias_init(module.bias.data)
+    return module
+
+def init_no_bias(module, weight_init, gain=1):
+    weight_init(module.weight.data, gain=gain)
+    return module
 
 class GridNet(nn.Module):
     def __init__(self, observation_shape, num_actions, embedding_size, use_lstm=False):
@@ -102,3 +110,65 @@ class GridNet(nn.Module):
             core_state,
         )
 
+class GridStateEmbeddingNet(nn.Module):
+    def __init__(self, observation_space):
+        super(GridStateEmbeddingNet, self).__init__()
+        self.observation_shape = observation_space.shape
+
+        init_ = lambda m: init_no_bias(m, nn.init.orthogonal_, nn.init.calculate_gain('relu'))
+
+        self.image_conv = nn.Sequential(
+            init_(nn.Conv2d(3, 16, (2, 2), bias=False)),
+            nn.ELU(),
+            init_(nn.Conv2d(16, 32, (2, 2), bias=False)),
+            nn.ELU(),
+            init_(nn.Conv2d(32, 32, (2, 2), bias=False)),
+            nn.ELU()
+        )
+        self.map = init_(nn.Linear(512, 256, bias=False))
+        self.map2 = init_(nn.Linear(256, 64, bias=False))
+        
+    def forward(self, env_outputs):
+        frame = env_outputs["frame"]
+        # -- [unroll_length x batch_size x height x width x channels]
+        x = frame
+        T, B, *_ = x.shape
+
+        # -- [unroll_length*batch_size x height x width x channels]
+        x = torch.flatten(x, 0, 1)  # Merge time and batch.
+        # -- [unroll_length*batch_size x channels x width x height]
+        x = x.transpose(1, 3)
+        x = self.image_conv(x)
+        x = x.view(x.shape[0], -1)
+        x = F.relu(self.map(x))
+        x = self.map2(x)
+
+        state_embedding = x.view(T, B, -1)
+
+        return state_embedding
+
+class SimpleGridStateEmbeddingNet(nn.Module):
+    def __init__(self, observation_space):
+        super(SimpleGridStateEmbeddingNet, self).__init__()
+        self.observation_shape = observation_space.shape
+
+        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                            constant_(x, 0), nn.init.calculate_gain('relu'))
+
+        x,y,z = observation_space.shape
+        self.map = nn.Linear(x * y * z, 5, bias=False)
+        
+    def forward(self, env_outputs):
+        frame = env_outputs["frame"]
+        # -- [unroll_length x batch_size x height x width x channels]
+        x = frame
+        T, B, *_ = x.shape
+
+        # -- [unroll_length*batch_size x height x width x channels]
+        x = torch.flatten(x, 0, 1)  # Merge time and batch.
+        # -- [unroll_length*batch_size x channels x width x height]
+        x = x.view(x.shape[0], -1)
+        x = self.map(x)
+        state_embedding = x.view(T, B, -1)
+
+        return state_embedding

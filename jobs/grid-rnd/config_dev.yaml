@@ -12,6 +12,8 @@ training:
   grad_norm_clipping: 40.0
   num_buffers: 8
   checkpointing_frequency: 20
+  rnd_loss_coef: 1
+  intrinsic_reward_coef: 0.1
 evaluation:
   num_episodes: 10
 env:
