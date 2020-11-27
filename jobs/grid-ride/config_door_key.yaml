@@ -1,7 +1,7 @@
 training:
-  unroll_length: 60 # used to be 60
+  unroll_length: 60
   batch_size: 32
-  total_steps: 1_000_000_000 # used to be 500M
+  total_steps: 50_000_000
   entropy_cost: 0.0001
   baseline_cost: 0.5
   discounting: 0.99
@@ -12,15 +12,18 @@ training:
   grad_norm_clipping: 40
   num_buffers: 16
   checkpointing_frequency: 40
-  rnd_loss_coef: 0.01
   intrinsic_reward_coef: 0.001
+  forward_loss_coef: 10.0
+  inverse_loss_coef: 0.1
 evaluation:
   num_episodes: 20
 env:
-  # task: 'MiniGrid-MultiRoom-N4-S5-v0'
-  # task: 'MiniGrid-MultiRoom-N6-v0' # Still need more tweaking. This one is hard
-  # task: 'MiniGrid-MultiRoom-N6-S4-Easy-v0'
-  task: 'MiniGrid-MultiRoom-N6-S4-v0'
+  # task: 'MiniGrid-Empty-5x5-v0'
+  # task: 'MiniGrid-FourRooms-v0'
+  # task: 'MiniGrid-DoorKey-5x5-v0'
+  # task: 'MiniGrid-DoorKey-6x6-v0'
+  # task: 'MiniGrid-DoorKey-8x8-v0'
+  task: 'MiniGrid-DoorKey-16x16-v0'
 model:
   lstm: true
   embedding_size: 128

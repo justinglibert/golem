@@ -1,4 +1,5 @@
 import hydra
+import traceback
 import math
 import numpy as np
 from omegaconf import DictConfig
@@ -18,6 +19,8 @@ import threading
 from time import sleep
 from .net import GridNet as Net
 from .net import GridStateEmbeddingNet as EmbeddingNet
+from .net import MinigridForwardDynamicsNet  as ForwardNet
+from .net import MinigridInverseDynamicsNet  as InverseNet
 from .env import create_env, ResettingEnvironment
 from .vtrace import from_logits, from_importance_weights
 
@@ -55,6 +58,19 @@ def compute_policy_gradient_loss(logits, actions, advantages):
     return torch.sum(cross_entropy * advantages.detach())
 
 
+def compute_forward_dynamics_loss(pred_next_emb, next_emb):
+    forward_dynamics_loss = torch.norm(pred_next_emb - next_emb, dim=2, p=2)
+    return torch.sum(torch.mean(forward_dynamics_loss, dim=1))
+
+
+def compute_inverse_dynamics_loss(pred_actions, true_actions):
+    inverse_dynamics_loss = F.nll_loss(
+        F.log_softmax(torch.flatten(pred_actions, 0, 1), dim=-1), 
+        target=torch.flatten(true_actions, 0, 1), 
+        reduction='none')
+    inverse_dynamics_loss = inverse_dynamics_loss.view_as(true_actions)
+    return torch.sum(torch.mean(inverse_dynamics_loss, dim=1))
+
 def _create_buffers(unroll_length, observation_space, num_actions, initial_state):
     # Get specimens to infer shapes and dtypes.
     size = (unroll_length + 1,)
@@ -68,6 +84,7 @@ def _create_buffers(unroll_length, observation_space, num_actions, initial_state
         baseline=dict(size=size, dtype=torch.float32),
         last_action=dict(size=size, dtype=torch.int64),
         action=dict(size=size, dtype=torch.int64),
+        episode_state_count=dict(size=size, dtype=torch.float32)
     )
     buffers = {key: None for key in specs}
     for key in buffers:
@@ -136,7 +153,7 @@ def learner(
     initial_states = model.initial_state(batch_size=B)
     # Devices Ids should be replaced by local ranks
 
-    # Initialize the RND models
+    # Initialize the embedding model
     embedding_net = EmbeddingNet(observation_space)
     embedding_net = embedding_net.to(device)
     embedding_net.share_memory()
@@ -148,8 +165,29 @@ def learner(
         alpha=cfg.training.alpha,
     )
 
-    random_embedding_net = EmbeddingNet(observation_space)
-    random_embedding_net = random_embedding_net.to(device)
+
+    # Initialize the dynamics models
+    forward_net = ForwardNet(action_space.n)
+    forward_net = forward_net.to(device)
+    forward_net.share_memory()
+    forward_optimizer = torch.optim.RMSprop(
+        forward_net.parameters(),
+        lr=cfg.training.learning_rate,
+        momentum=cfg.training.momentum,
+        eps=cfg.training.epsilon,
+        alpha=cfg.training.alpha,
+    )
+
+    inverse_net = InverseNet(action_space.n)
+    inverse_net = inverse_net.to(device)
+    inverse_net.share_memory()
+    inverse_optimizer = torch.optim.RMSprop(
+        inverse_net.parameters(),
+        lr=cfg.training.learning_rate,
+        momentum=cfg.training.momentum,
+        eps=cfg.training.epsilon,
+        alpha=cfg.training.alpha,
+    )
 
     def lr_lambda(epoch):
         # This should also be multiplied by the amount of learner
@@ -157,6 +195,8 @@ def learner(
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     embedding_scheduler = torch.optim.lr_scheduler.LambdaLR(embedding_optimizer, lr_lambda)
+    forward_scheduler = torch.optim.lr_scheduler.LambdaLR(forward_optimizer, lr_lambda)
+    inverse_scheduler = torch.optim.lr_scheduler.LambdaLR(inverse_optimizer, lr_lambda)
     # Register the evaluator callback
     current_iteration = 0
     if is_leader:
@@ -196,7 +236,13 @@ def learner(
             embedding_net.load_state_dict(checkpoint['embedding_net'])
             embedding_scheduler.load_state_dict(checkpoint['embedding_scheduler'])
 
-            random_embedding_net.load_state_dict(checkpoint['random_embedding_net'])
+            forward_optimizer.load_state_dict(checkpoint['forward_optimizer'])
+            forward_net.load_state_dict(checkpoint['forward_net'])
+            forward_scheduler.load_state_dict(checkpoint['forward_scheduler'])
+
+            inverse_optimizer.load_state_dict(checkpoint['inverse_optimizer'])
+            inverse_net.load_state_dict(checkpoint['inverse_net'])
+            inverse_scheduler.load_state_dict(checkpoint['inverse_scheduler'])
 
             impala_group.registered_sync('set_samples_collected', args=(checkpoint['samples_collected'],))
             impala_group.registered_sync('set_step_processed', args=(checkpoint['steps_processed'],))
@@ -207,14 +253,18 @@ def learner(
             scheduler.load_state_dict(checkpoint['scheduler'])
             embedding_optimizer.load_state_dict(checkpoint['embedding_optimizer'])
             embedding_scheduler.load_state_dict(checkpoint['embedding_scheduler'])
+            forward_optimizer.load_state_dict(checkpoint['forward_optimizer'])
+            forward_scheduler.load_state_dict(checkpoint['forward_scheduler'])
+            inverse_optimizer.load_state_dict(checkpoint['inverse_optimizer'])
+            inverse_scheduler.load_state_dict(checkpoint['inverse_scheduler'])
             current_iteration = checkpoint['iteration']
         logger.info("Restore successful!")
         logger.info(f"Current iteration: {current_iteration}")
 
     model = DDP(model, device_ids=[0])
     embedding_net = DDP(embedding_net, device_ids=[0])
-    # We also DDP the frozen net so it is broadcasted to all learners
-    random_embedding_net = DDP(random_embedding_net, device_ids=[0])
+    forward_net = DDP(forward_net, device_ids=[0])
+    inverse_net = DDP(inverse_net, device_ids=[0])
 
     logger.info("Waiting on the barrier")
     impala_group.barrier(is_leader)
@@ -277,13 +327,19 @@ def learner(
                     t.to(device=device, non_blocking=True) for t in initial_agent_state
                 )
                 # Intrinsic reward
-                random_embedding = random_embedding_net(batch)
-                predicted_embedding = embedding_net(batch)
-                intrinsic_rewards = torch.norm(predicted_embedding.detach() - random_embedding.detach(), dim=2, p=2)
+                count_rewards = batch["episode_state_count"][1:]
+                state_emb = embedding_net(batch['frame'][:-1])
+                next_state_emb = embedding_net(batch['frame'][1:])
+                pred_next_state_emb = forward_net(state_emb, batch['action'][1:])
+                pred_action = inverse_net(state_emb, next_state_emb)
+                control_rewards = torch.norm(next_state_emb - state_emb, dim=2, p=2)
+                intrinsic_rewards = control_rewards * count_rewards
                 intrinsic_rewards *= cfg.training.intrinsic_reward_coef
                 mean_intrinsic_reward = torch.mean(intrinsic_rewards)
                 var_intrinsic_reward = torch.var(intrinsic_rewards)
-                rnd_loss = cfg.training.rnd_loss_coef * torch.sum(torch.norm(predicted_embedding - random_embedding.detach(), dim=2, p=2)) 
+                # Losses
+                forward_dynamics_loss = cfg.training.forward_loss_coef * compute_forward_dynamics_loss(pred_next_state_emb, next_state_emb)
+                inverse_dynamics_loss = cfg.training.inverse_loss_coef * compute_inverse_dynamics_loss(pred_action, batch['action'][1:])
 
                 learner_outputs, unused_state = model(batch, initial_agent_state)
                 # Take final value function slice for bootstrapping.
@@ -294,7 +350,7 @@ def learner(
                     key: tensor[:-1] for key, tensor in learner_outputs.items()
                 }
                 rewards = batch["reward"]
-                rewards = rewards + intrinsic_rewards[1:]
+                rewards = rewards + intrinsic_rewards
                 clipped_rewards = rewards.clamp(-1, 1)
                 # clipped_rewards = rewards
                 discounts = (~batch["done"]).float() * cfg.training.discounting
@@ -318,17 +374,20 @@ def learner(
                 entropy_loss = cfg.training.entropy_cost * compute_entropy_loss(
                     learner_outputs["policy_logits"]
                 )
-                total_loss = pg_loss + baseline_loss + entropy_loss
+                total_loss = pg_loss + baseline_loss + entropy_loss + forward_dynamics_loss + inverse_dynamics_loss
                 episode_returns = batch["episode_return"][batch["done"]]
                 ep_returns = tuple(episode_returns.cpu().numpy())
                 moving_episode_returns.addm(ep_returns)
                 mean_ep_returns_moving, var_ep_returns_moving, mean_abs_ep_returns = moving_episode_returns.stats(add_abs=True) 
                 optimizer.zero_grad()
                 embedding_optimizer.zero_grad()
-                rnd_loss.backward()
+                forward_optimizer.zero_grad()
+                inverse_optimizer.zero_grad()
                 total_loss.backward()
                 grad_norm_model = sum(p.grad.data.norm(2).item() ** 2 for p in model.parameters() if p.grad is not None) ** 0.5
                 grad_norm_embedding = sum(p.grad.data.norm(2).item() ** 2 for p in embedding_net.parameters() if p.grad is not None) ** 0.5
+                grad_norm_forward = sum(p.grad.data.norm(2).item() ** 2 for p in forward_net.parameters() if p.grad is not None) ** 0.5
+                grad_norm_inverse = sum(p.grad.data.norm(2).item() ** 2 for p in inverse_net.parameters() if p.grad is not None) ** 0.5
                 stats = {
                     "real_batch_size": bsize,
                     #"episode_returns": ep_returns,
@@ -336,6 +395,8 @@ def learner(
                     "mean_abs_ep_return": mean_abs_ep_returns,
                     "grad_norm_model": grad_norm_model,
                     "grad_norm_embedding": grad_norm_embedding,
+                    "grad_norm_forward": grad_norm_forward,
+                    "grad_norm_inverse": grad_norm_inverse,
                     "var_ep_returns_moving": var_ep_returns_moving,
                     "ep_in_mini_batch": len(ep_returns),
                     "mean_intrinsic_reward": mean_intrinsic_reward.item(),
@@ -344,7 +405,8 @@ def learner(
                     "pg_loss": pg_loss.item(),
                     "baseline_loss": baseline_loss.item(),
                     "entropy_loss": entropy_loss.item(),
-                    "rnd_loss": rnd_loss.item(),
+                    "forward_loss": forward_dynamics_loss.item(),
+                    "inverse_loss": inverse_dynamics_loss.item(),
                     "total_ep": moving_episode_returns.total
                 }
                 learned_queue.put(buffer_index)
@@ -354,12 +416,23 @@ def learner(
                 nn.utils.clip_grad_norm_(
                     embedding_net.parameters(), cfg.training.grad_norm_clipping
                 )
+                nn.utils.clip_grad_norm_(
+                    forward_net.parameters(), cfg.training.grad_norm_clipping
+                )
+                nn.utils.clip_grad_norm_(
+                    inverse_net.parameters(), cfg.training.grad_norm_clipping
+                )
                 optimizer.step()
                 embedding_optimizer.step()
+                forward_optimizer.step()
+                inverse_optimizer.step()
                 scheduler.step()
                 embedding_scheduler.step()
+                forward_scheduler.step()
+                inverse_scheduler.step()
         except Exception as e:
             logger.error("Error in learner thread: " + str(e))
+            logger.error(traceback.print_exc())
             learned_queue.put(-1)
 
     # Save once
@@ -381,7 +454,12 @@ def learner(
             embedding_net=embedding_net.module.state_dict(),
             embedding_optimizer=embedding_optimizer.state_dict(),
             embedding_scheduler=embedding_scheduler.state_dict(),
-            random_embedding_net=random_embedding_net.module.state_dict(),
+            forward_net=forward_net.module.state_dict(),
+            forward_optimizer=forward_optimizer.state_dict(),
+            forward_scheduler=forward_scheduler.state_dict(),
+            inverse_net=inverse_net.module.state_dict(),
+            inverse_optimizer=inverse_optimizer.state_dict(),
+            inverse_scheduler=inverse_scheduler.state_dict(),
             steps_processed=steps_processed,
             parameter_updates=parameter_updates,
             samples_collected=samples_collected,
@@ -396,6 +474,10 @@ def learner(
             scheduler=scheduler.state_dict(),
             embedding_optimizer=embedding_optimizer.state_dict(),
             embedding_scheduler=embedding_scheduler.state_dict(),
+            forward_optimizer=forward_optimizer.state_dict(),
+            forward_scheduler=forward_scheduler.state_dict(),
+            inverse_optimizer=inverse_optimizer.state_dict(),
+            inverse_scheduler=inverse_scheduler.state_dict(),
             iteration=current_iteration
             ), 'checkpoint.pt')
         logger.info("done")
@@ -455,7 +537,8 @@ def learner(
             mean_ep_returns_moving = stats["mean_ep_returns_moving"]
             mean_abs_ep_return = stats["mean_abs_ep_return"]
             var_ep_returns_moving = stats["var_ep_returns_moving"]
-            rnd_loss = stats["rnd_loss"]
+            forward_loss = stats["forward_loss"]
+            inverse_loss = stats["inverse_loss"]
             mean_intrinsic_reward = stats["mean_intrinsic_reward"]
             total_ep = stats["total_ep"]
             if is_leader:
@@ -464,7 +547,8 @@ def learner(
                 writer.add_scalar("Training/PGLoss", pg_loss, global_step=global_step)
                 writer.add_scalar("Training/BaselineLoss", baseline_loss, global_step=global_step)
                 writer.add_scalar("Training/EntropyLoss", entropy_loss, global_step=global_step)
-                writer.add_scalar("Training/RndLoss", rnd_loss, global_step=global_step)
+                writer.add_scalar("Training/ForwardLoss", forward_loss, global_step=global_step)
+                writer.add_scalar("Training/InverseLoss", inverse_loss, global_step=global_step)
                 writer.add_scalar("Training/MeanEpisodeReturns", mean_ep_returns_moving, global_step=global_step)
                 writer.add_scalar("Training/MeanIntrinsicReward", mean_intrinsic_reward, global_step=global_step)
                 writer.add_scalar("Training/MeanAbsEpisodeReturns", mean_abs_ep_return, global_step=global_step)
@@ -473,17 +557,22 @@ def learner(
                 if mean_ep_returns_moving > best_mean_ep_return:
                     logger.info("Saving best checkpoint...")
                     torch.save(dict(
-                            model=model.module.state_dict(),
-                            optimizer=optimizer.state_dict(),
-                            scheduler=scheduler.state_dict(),
-                            embedding_net=embedding_net.module.state_dict(),
-                            embedding_optimizer=embedding_optimizer.state_dict(),
-                            embedding_scheduler=embedding_scheduler.state_dict(),
-                            random_embedding_net=random_embedding_net.module.state_dict(),
-                            steps_processed=steps_processed,
-                            parameter_updates=parameter_updates,
-                            samples_collected=samples_collected,
-                            iteration=current_iteration
+                        optimizer=optimizer.state_dict(),
+                        model=model.module.state_dict(),
+                        scheduler=scheduler.state_dict(),
+                        embedding_net=embedding_net.module.state_dict(),
+                        embedding_optimizer=embedding_optimizer.state_dict(),
+                        embedding_scheduler=embedding_scheduler.state_dict(),
+                        forward_net=forward_net.module.state_dict(),
+                        forward_optimizer=forward_optimizer.state_dict(),
+                        forward_scheduler=forward_scheduler.state_dict(),
+                        inverse_net=inverse_net.module.state_dict(),
+                        inverse_optimizer=inverse_optimizer.state_dict(),
+                        inverse_scheduler=inverse_scheduler.state_dict(),
+                        steps_processed=steps_processed,
+                        parameter_updates=parameter_updates,
+                        samples_collected=samples_collected,
+                        iteration=current_iteration
                         ), 'best.pt')
                     best_mean_ep_return = mean_ep_returns_moving
                     logger.info("done")
@@ -569,17 +658,22 @@ def learner(
                     # - samples_collected
                     logger.info("Saving checkpoint...")
                     torch.save(dict(
-                            model=model.module.state_dict(),
-                            optimizer=optimizer.state_dict(),
-                            scheduler=scheduler.state_dict(),
-                            embedding_net=embedding_net.module.state_dict(),
-                            embedding_optimizer=embedding_optimizer.state_dict(),
-                            embedding_scheduler=embedding_scheduler.state_dict(),
-                            random_embedding_net=random_embedding_net.module.state_dict(),
-                            steps_processed=steps_processed,
-                            parameter_updates=parameter_updates,
-                            samples_collected=samples_collected,
-                            iteration=current_iteration
+                        model=model.module.state_dict(),
+                        optimizer=optimizer.state_dict(),
+                        scheduler=scheduler.state_dict(),
+                        embedding_net=embedding_net.module.state_dict(),
+                        embedding_optimizer=embedding_optimizer.state_dict(),
+                        embedding_scheduler=embedding_scheduler.state_dict(),
+                        forward_net=forward_net.module.state_dict(),
+                        forward_optimizer=forward_optimizer.state_dict(),
+                        forward_scheduler=forward_scheduler.state_dict(),
+                        inverse_net=inverse_net.module.state_dict(),
+                        inverse_optimizer=inverse_optimizer.state_dict(),
+                        inverse_scheduler=inverse_scheduler.state_dict(),
+                        steps_processed=steps_processed,
+                        parameter_updates=parameter_updates,
+                        samples_collected=samples_collected,
+                        iteration=current_iteration
                         ), 'checkpoint.pt')
                     logger.info("done")
 
@@ -592,6 +686,10 @@ def learner(
                         optimizer=optimizer.state_dict(),
                         embedding_optimizer=embedding_optimizer.state_dict(),
                         embedding_scheduler=embedding_scheduler.state_dict(),
+                        forward_optimizer=forward_optimizer.state_dict(),
+                        forward_scheduler=forward_scheduler.state_dict(),
+                        inverse_optimizer=inverse_optimizer.state_dict(),
+                        inverse_scheduler=inverse_scheduler.state_dict(),
                         iteration=current_iteration
                         ), 'checkpoint.pt')
                     logger.info("done")
@@ -629,6 +727,7 @@ def actor(
     buffers = _create_buffers(
         cfg.training.unroll_length, observation_space, action_space.n, agent_state
     )
+    episode_state_count_dict = {}
     impala_group.registered_sync("reset_global_timer")
     for iteration in it.count():
         # Reset the buffers to prevent the memory leak
@@ -646,6 +745,15 @@ def actor(
                 buffers[key][0, ...] = agent_output[key]
             for i, tensor in enumerate(agent_state):
                 buffers["initial_agent_state"][i][...] = tensor
+            episode_state_key = tuple(env_output['frame'].view(-1).tolist())
+            if episode_state_key in episode_state_count_dict:
+                episode_state_count_dict[episode_state_key] += 1
+            else:
+                episode_state_count_dict.update({episode_state_key: 1})
+            buffers["episode_state_count"][0, ...] = torch.tensor(1 / np.sqrt(episode_state_count_dict.get(episode_state_key)))
+
+        if env_output['done'][0][0]:
+            episode_state_count_dict = {}
 
         # Do new rollout.
         for t in range(cfg.training.unroll_length):
@@ -662,6 +770,16 @@ def actor(
                     buffers[key][t + 1, ...] = env_output[key]
                 for key in agent_output:
                     buffers[key][t + 1, ...] = agent_output[key]
+
+            episode_state_key = tuple(env_output['frame'].view(-1).tolist())
+            if episode_state_key in episode_state_count_dict:
+                episode_state_count_dict[episode_state_key] += 1
+            else:
+                episode_state_count_dict.update({episode_state_key: 1})
+            buffers["episode_state_count"][t+ 1, ...] = torch.tensor(1 / np.sqrt(episode_state_count_dict.get(episode_state_key)))
+
+            if env_output['done'][0][0]:
+                episode_state_count_dict = {}
 
         with prof(category="replay-buffer"):
             replay_buffer.append(buffers)
@@ -821,6 +939,7 @@ def evaluator_script(cfg: DictConfig):
     logger = glm.utils.default_logger
     torch.set_num_threads(4)
     logger.info("Evaluator Script")
+    logger.info("Script: " + cfg.env.task)
     env = create_env(cfg.env.task)
     observation_space = env.observation_space
     action_space = env.action_space

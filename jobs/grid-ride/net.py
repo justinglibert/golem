@@ -111,56 +111,20 @@ class GridNet(nn.Module):
         )
 
 class GridStateEmbeddingNet(nn.Module):
+    
     def __init__(self, observation_space):
         super(GridStateEmbeddingNet, self).__init__()
         self.observation_shape = observation_space.shape
 
-        init_ = lambda m: init_no_bias(m, nn.init.orthogonal_, nn.init.calculate_gain('relu'))
+        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                            constant_(x, 0), nn.init.calculate_gain('relu'))
 
         self.image_conv = nn.Sequential(
-            init_(nn.Conv2d(3, 16, (2, 2), bias=False)),
+            init_(nn.Conv2d(3, 32, (3, 3), stride=2, padding=1)),
             nn.ELU(),
-            init_(nn.Conv2d(16, 32, (2, 2), bias=False)),
+            init_(nn.Conv2d(32, 32, (3, 3), stride=2, padding=1)),
             nn.ELU(),
-            init_(nn.Conv2d(32, 32, (2, 2), bias=False)),
-            nn.ELU()
-        )
-        self.map = init_(nn.Linear(512, 256, bias=False))
-        self.map2 = init_(nn.Linear(256, 64, bias=False))
-        
-    def forward(self, env_outputs):
-        frame = env_outputs["frame"]
-        # -- [unroll_length x batch_size x height x width x channels]
-        x = frame
-        T, B, *_ = x.shape
-
-        # -- [unroll_length*batch_size x height x width x channels]
-        x = torch.flatten(x, 0, 1)  # Merge time and batch.
-        # -- [unroll_length*batch_size x channels x width x height]
-        x = x.transpose(1, 3)
-        x = self.image_conv(x)
-        x = x.view(x.shape[0], -1)
-        x = F.relu(self.map(x))
-        x = self.map2(x)
-
-        state_embedding = x.view(T, B, -1)
-
-        return state_embedding
-
-class GridStateEmbeddingNet2(nn.Module):
-    
-    def __init__(self, observation_space):
-        super(GridStateEmbeddingNet2, self).__init__()
-        self.observation_shape = observation_space.shape
-
-        init_ = lambda m: init_no_bias(m, nn.init.orthogonal_, nn.init.calculate_gain('relu'))
-
-        self.image_conv = nn.Sequential(
-            init_(nn.Conv2d(3, 32, (3, 3), stride=2, padding=1, bias=False)),
-            nn.ELU(),
-            init_(nn.Conv2d(32, 32, (3, 3), stride=2, padding=1, bias=False)),
-            nn.ELU(),
-            init_(nn.Conv2d(32, 128, (3, 3), stride=2, padding=1, bias=False)),
+            init_(nn.Conv2d(32, 128, (3, 3), stride=2, padding=1)),
             nn.ELU()
         )
         
@@ -179,28 +143,50 @@ class GridStateEmbeddingNet2(nn.Module):
 
         return state_embedding
 
-class SimpleGridStateEmbeddingNet(nn.Module):
-    def __init__(self, observation_space):
-        super(SimpleGridStateEmbeddingNet, self).__init__()
-        self.observation_shape = observation_space.shape
+class MinigridInverseDynamicsNet(nn.Module):
+    def __init__(self, num_actions):
+        super(MinigridInverseDynamicsNet, self).__init__()
+        self.num_actions = num_actions 
+        
+        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                            constant_(x, 0), nn.init.calculate_gain('relu'))
+        self.inverse_dynamics = nn.Sequential(
+            init_(nn.Linear(2 * 128, 256)), 
+            nn.ReLU(),  
+        )
+
+        init_ = lambda m: init(m, nn.init.orthogonal_, 
+            lambda x: nn.init.constant_(x, 0))
+        self.id_out = init_(nn.Linear(256, self.num_actions))
+
+        
+    def forward(self, state_embedding, next_state_embedding):
+        inputs = torch.cat((state_embedding, next_state_embedding), dim=2)
+        action_logits = self.id_out(self.inverse_dynamics(inputs))
+        return action_logits
+    
+
+class MinigridForwardDynamicsNet(nn.Module):
+    def __init__(self, num_actions):
+        super(MinigridForwardDynamicsNet, self).__init__()
+        self.num_actions = num_actions 
 
         init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
                             constant_(x, 0), nn.init.calculate_gain('relu'))
+    
+        self.forward_dynamics = nn.Sequential(
+            init_(nn.Linear(128 + self.num_actions, 256)), 
+            nn.ReLU(), 
+        )
 
-        x,y,z = observation_space.shape
-        self.map = nn.Linear(x * y * z, 5, bias=False)
-        
-    def forward(self, env_outputs):
-        frame = env_outputs["frame"]
-        # -- [unroll_length x batch_size x height x width x channels]
-        x = frame
-        T, B, *_ = x.shape
+        init_ = lambda m: init(m, nn.init.orthogonal_, 
+            lambda x: nn.init.constant_(x, 0))
 
-        # -- [unroll_length*batch_size x height x width x channels]
-        x = torch.flatten(x, 0, 1)  # Merge time and batch.
-        # -- [unroll_length*batch_size x channels x width x height]
-        x = x.view(x.shape[0], -1)
-        x = self.map(x)
-        state_embedding = x.view(T, B, -1)
+        self.fd_out = init_(nn.Linear(256, 128))
 
-        return state_embedding
+    def forward(self, state_embedding, action):
+        action_one_hot = F.one_hot(action, num_classes=self.num_actions).float()
+        inputs = torch.cat((state_embedding, action_one_hot), dim=2)
+        next_state_emb = self.fd_out(self.forward_dynamics(inputs))
+        return next_state_emb
+
