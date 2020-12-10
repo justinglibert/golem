@@ -1,8 +1,10 @@
 training:
   unroll_length: 100 
   batch_size: 32
-  total_steps: 300_000_000
+  total_steps: 125_000_000
+    # total_steps: 150_000_000
   entropy_cost: 0.0001
+    # entropy_cost: 0.001
   baseline_cost: 0.5
   discounting: 0.99
   learning_rate: 0.0001
@@ -13,6 +15,7 @@ training:
   num_buffers: 16
   checkpointing_frequency: 40
   intrinsic_reward_coef: 0.01
+    # intrinsic_reward_coef: 0.05
   forward_loss_coef: 1.0
   inverse_loss_coef: 0.01
 evaluation:
@@ -22,7 +25,10 @@ env:
   # task: 'MiniGrid-MultiRoom-N6-v0' # Still need more tweaking. This one is hard
   # task: 'MiniGrid-MultiRoom-N6-S4-Easy-v0'
   # task: 'MiniGrid-MultiRoom-N6-S4-v0'
-  task: 'MiniGrid-MultiRoom-N7-S4-v0'
+  # task: 'MiniGrid-MultiRoom-N7-S4-v0'
+  # task: 'MiniGrid-MultiRoom-N10-S4-v0'
+  # task: 'MiniGrid-MultiRoom-N10-S10-v0'
+  task: 'MiniGrid-MultiRoom-N12-S10-v0'
 model:
   lstm: true
   embedding_size: 256

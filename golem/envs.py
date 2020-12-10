@@ -1,6 +1,29 @@
 from gym_minigrid.register import register
 from gym_minigrid.envs import MultiRoomEnv
 
+class MultiRoomEnvN12S10(MultiRoomEnv):
+    def __init__(self):
+        super().__init__(
+            minNumRooms=12,
+            maxNumRooms=12,
+            maxRoomSize=10
+        )
+class MultiRoomEnvN10S4(MultiRoomEnv):
+    def __init__(self):
+        super().__init__(
+            minNumRooms=10,
+            maxNumRooms=10,
+            maxRoomSize=4
+        )
+
+class MultiRoomEnvN10S10(MultiRoomEnv):
+    def __init__(self):
+        super().__init__(
+            minNumRooms=10,
+            maxNumRooms=10,
+            maxRoomSize=10
+        )
+
 class MultiRoomEnvN7S4(MultiRoomEnv):
     def __init__(self):
         super().__init__(
@@ -23,6 +46,18 @@ class MultiRoomEnvN6S4Easy(MultiRoomEnv):
             maxNumRooms=6,
             maxRoomSize=4
         )
+register(
+    id='MiniGrid-MultiRoom-N12-S10-v0',
+    entry_point='golem.envs:MultiRoomEnvN12S10'
+)
+register(
+    id='MiniGrid-MultiRoom-N10-S4-v0',
+    entry_point='golem.envs:MultiRoomEnvN10S4'
+)
+register(
+    id='MiniGrid-MultiRoom-N10-S10-v0',
+    entry_point='golem.envs:MultiRoomEnvN10S4'
+)
 register(
     id='MiniGrid-MultiRoom-N7-S4-v0',
     entry_point='golem.envs:MultiRoomEnvN7S4'

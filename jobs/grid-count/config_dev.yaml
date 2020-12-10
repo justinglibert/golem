@@ -1,0 +1,37 @@
+training:
+  unroll_length: 80
+  batch_size: 8
+  total_steps: 10000000
+  entropy_cost: 0.0006
+  baseline_cost: 0.5
+  discounting: 0.99
+  learning_rate: 0.00048
+  alpha: 0.99
+  momentum: 0.0
+  epsilon: 0.01
+  grad_norm_clipping: 40.0
+  num_buffers: 8
+  checkpointing_frequency: 20
+  intrinsic_reward_coef: 0.001
+evaluation:
+  num_episodes: 10
+env:
+  task: 'MiniGrid-Empty-5x5-v0'
+model:
+  lstm: true
+  embedding_size: 32
+run:
+  force_rank_0: learner
+  tasks:
+    learner:
+      requirements:
+        cpus: 4
+      processes: 1
+    actor:
+      requirements:
+        cpus: 4
+      processes: 1 
+    evaluator:
+      requirements:
+        cpus: 8
+      processes: 1
