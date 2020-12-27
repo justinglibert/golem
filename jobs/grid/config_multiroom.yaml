@@ -1,7 +1,7 @@
 training:
   unroll_length: 100
   batch_size: 32
-  total_steps: 75_000_000
+  total_steps: 80_000_000
   entropy_cost: 0.0001
   baseline_cost: 0.5
   discounting: 0.99
@@ -15,9 +15,12 @@ training:
 evaluation:
   num_episodes: 20
 env:
+  seed: 1
+  task: 'MiniGrid-MultiRoom-N4-S5-v0'
   # task: 'MiniGrid-MultiRoom-N6-S4-v0'
   # task: 'MiniGrid-MultiRoom-N10-S4-v0'
-  task: 'MiniGrid-MultiRoom-N10-S10-v0'
+  # task: 'MiniGrid-MultiRoom-N12-S10-v0'
+  # task: 'MiniGrid-KeyCorridorS3R3-v0'
 model:
   lstm: true
   embedding_size: 256
@@ -32,7 +35,7 @@ run:
     actor:
       requirements:
         cpus: 4
-      processes: 88 
+      processes: 66 
     evaluator:
       requirements:
         cpus: 4

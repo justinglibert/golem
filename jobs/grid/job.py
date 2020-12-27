@@ -576,7 +576,11 @@ def actor(
 
             with prof(category="env"):
                 # Reseed when episode restarts
-                env_output = env.step(agent_output["action"], force_seed=np.random.randint(0,1000000))
+                s = np.random.randint(0,1000000)
+                fs = cfg.env.get("seed", False)
+                if fs is not False:
+                    s = fs
+                env_output = env.step(agent_output["action"], force_seed=s)
 
             with prof(category="buffer"):
                 for key in env_output:

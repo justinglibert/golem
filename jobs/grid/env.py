@@ -51,6 +51,8 @@ class ResettingEnvironment:
         episode_step = self.episode_step
         episode_return = self.episode_return
         if done:
+            if force_seed is not False:
+                self.gym_env.seed(seed=force_seed)
             frame = self.gym_env.reset()
             self.episode_return = torch.zeros(1, 1)
             self.episode_step = torch.zeros(1, 1, dtype=torch.int32)
